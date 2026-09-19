@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:,"><title>مآل | منصة الامتثال التنظيمي</title>
+  <link rel="stylesheet" href="/static/styles.css?v=enterprise-1">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark">م</span><div><strong>مآل</strong><small>Maal Compliance</small></div></div>
+      <nav class="main-nav" aria-label="Primary navigation">
+        <button class="nav-item active" data-page="dashboard"><span class="nav-index">01</span><span data-i18n="nav_dashboard">لوحة المتابعة</span></button>
+        <button class="nav-item" data-page="analysis"><span class="nav-index">02</span><span data-i18n="nav_analysis">التحليل التنظيمي</span></button>
+        <button class="nav-item" data-page="review"><span class="nav-index">03</span><span data-i18n="nav_review">مراجعة الملفات</span></button>
+        <button class="nav-item" data-page="trace"><span class="nav-index">04</span><span data-i18n="nav_trace">تتبع الأثر</span></button>
+        <button class="nav-item" data-page="financial"><span class="nav-index">05</span><span data-i18n="nav_financial">التعرض المالي</span></button>
+        <button class="nav-item" data-page="human"><span class="nav-index">06</span><span data-i18n="nav_human">المراجعة البشرية</span></button>
+      </nav>
+      <div class="sidebar-foot"><span class="system-dot"></span><span data-i18n="system_ready">النظام جاهز</span></div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <button id="menuButton" class="menu-button" aria-label="Menu">☰</button>
+        <div><p class="workspace-label" data-i18n="workspace">مساحة العمل</p><h1 id="pageTitle">لوحة المتابعة</h1></div>
+        <div class="topbar-actions"><span class="demo-label" data-i18n="demo_data">بيانات عرض اصطناعية</span><div class="language-toggle" role="group" aria-label="Language"><button data-lang="ar" class="active">العربية</button><button data-lang="en">English</button></div></div>
+      </header>
+
+      <main class="content">
+        <section class="page active" id="page-dashboard">
+          <div class="page-intro"><div><h2 data-i18n="dashboard_title">نظرة عامة على الامتثال</h2><p data-i18n="dashboard_subtitle">ملخص التغييرات التنظيمية والأثر التشغيلي الحالي.</p></div><button class="primary-action" id="refreshDashboard" data-i18n="refresh">تحديث البيانات</button></div>
+          <div class="kpi-grid">
+            <article class="kpi-card"><span data-i18n="reg_updates">تحديثات تنظيمية</span><strong id="kpiUpdates">—</strong><small data-i18n="verified_changes">تغييرات موثقة</small></article>
+            <article class="kpi-card critical"><span data-i18n="high_issues">قضايا عالية الأولوية</span><strong id="kpiHigh">—</strong><small data-i18n="requires_action">تحتاج إجراء</small></article>
+            <article class="kpi-card"><span data-i18n="affected_departments">الإدارات المتأثرة</span><strong id="kpiDepartments">—</strong><small data-i18n="traceable_departments">مرتبطة بالأثر</small></article>
+            <article class="kpi-card"><span data-i18n="estimated_exposure">التعرض المالي التقديري</span><strong id="kpiExposure">—</strong><small data-i18n="synthetic_estimate">تقدير من مدخلات ديمو</small></article>
+          </div>
+          <div class="dashboard-grid">
+            <article class="surface wide"><div class="surface-head"><div><h3 data-i18n="recent_changes">أحدث التغييرات التنظيمية</h3><p data-i18n="recent_changes_hint">التغييرات الأحدث ذات الصلة بالمنشأة</p></div><button class="text-button" data-open-page="analysis" data-i18n="view_analysis">فتح التحليل</button></div><div class="table-scroll"><table><thead><tr><th data-i18n="regulation">اللائحة</th><th data-i18n="article">المادة</th><th data-i18n="change">التغيير</th><th data-i18n="applicability">الانطباق</th><th data-i18n="priority">الأولوية</th></tr></thead><tbody id="recentChangesBody"></tbody></table></div></article>
+            <article class="surface watch-card"><div class="surface-head"><div><h3 data-i18n="recent_30">تحديثات آخر 30 يومًا</h3><p data-i18n="watch_hint">متطلبات يجب مراقبتها عند رفع ملفات جديدة</p></div><span class="status-badge warning" id="watchCount">—</span></div><div id="watchList" class="watch-list"></div></article>
+          </div>
+        </section>
+
+        <section class="page" id="page-analysis">
+          <div class="page-intro"><div><h2 data-i18n="analysis_title">التحليل التنظيمي</h2><p data-i18n="analysis_subtitle">ابحث في المصادر الرسمية واعرض المتطلب الحالي ومبررات الانطباق.</p></div></div>
+          <div class="search-bar"><input id="regulationSearch" data-i18n-placeholder="search_placeholder" placeholder="ابحث باللائحة أو الجهة أو المجال أو المادة"><span data-i18n="official_sources_only">مصادر رسمية ومسجلة فقط</span></div>
+          <div class="analysis-layout">
+            <aside class="result-list" id="regulationResults"></aside>
+            <article class="surface detail-panel" id="regulationDetail"><div class="empty-state"><h3 data-i18n="select_regulation">اختر لائحة</h3><p data-i18n="select_regulation_hint">اختر نتيجة من القائمة لعرض التحليل.</p></div></article>
+          </div>
+        </section>
+
+        <section class="page" id="page-review">
+          <div class="page-intro"><div><h2 data-i18n="review_title">مراجعة امتثال ملف</h2><p data-i18n="review_subtitle">افحص سياسة أو عقدًا أو مقترح مشروع مقابل المتطلبات الحالية.</p></div><button id="demoReviewButton" class="secondary-action" data-i18n="try_sample">تجربة الملف الجاهز</button></div>
+          <article class="surface upload-surface">
+            <label id="dropZone" class="drop-zone" for="reviewFile"><input id="reviewFile" type="file" accept=".pdf,.docx,.xlsx,.pptx,.txt,.csv"><strong data-i18n="drop_title">اسحب الملف هنا أو اختره من جهازك</strong><span data-i18n="drop_formats">PDF, DOCX, XLSX, PPTX, TXT, CSV · حتى 25 MB</span><small id="selectedFile" data-i18n="no_file">لم يتم اختيار ملف</small></label>
+            <div class="form-row"><label><span data-i18n="department">الإدارة</span><input id="reviewDepartment" value="Environmental Engineering"></label><label><span data-i18n="project">المشروع</span><input id="reviewProject" value="Advanced Manufacturing Expansion"></label><button id="reviewSubmit" class="primary-action" disabled data-i18n="run_review">تشغيل المراجعة</button></div>
+          </article>
+          <div id="reviewProgress" class="progress-note" hidden></div>
+          <section id="reviewResults" hidden>
+            <div class="review-summary-row"><article class="score-panel"><span data-i18n="compliance_score">درجة الامتثال</span><strong id="complianceScore">—</strong><small data-i18n="weighted_score">درجة موزونة حسب أهمية المتطلبات</small></article><div id="statusCounts" class="status-counts"></div></div>
+            <div id="recentUpdateBanner"></div><div id="reviewFindings" class="finding-list"></div>
+          </section>
+        </section>
+
+        <section class="page" id="page-trace">
+          <div class="page-intro"><div><h2 data-i18n="trace_title">تتبع الأثر والاعتماديات</h2><p data-i18n="trace_subtitle">مسار قابل للتدقيق من التشريع إلى المشروع المتأثر.</p></div></div>
+          <article class="surface"><div id="tracePath" class="trace-path"></div><div class="trace-context"><span data-i18n="stored_relation">العلاقات محفوظة في قاعدة البيانات</span><span data-i18n="no_internal_ids">لا تُعرض المعرفات الداخلية</span></div></article>
+        </section>
+
+        <section class="page" id="page-financial">
+          <div class="page-intro"><div><h2 data-i18n="financial_title">التعرض المالي</h2><p data-i18n="financial_subtitle">تقديرات حتمية مبنية على مدخلات الشركة المتاحة.</p></div><span class="estimate-label" data-i18n="estimated_financial_exposure">Estimated financial exposure</span></div>
+          <div id="financialGrid" class="financial-grid"></div>
+          <article class="surface methodology"><h3 data-i18n="methodology">منهجية الحساب</h3><p data-i18n="methodology_text">تُحسب المكونات من مدخلات ديمو اصطناعية معلنة. لا تُعرض عقوبة تنظيمية مباشرة دون مصدر رسمي موثق.</p></article>
+        </section>
+
+        <section class="page" id="page-human">
+          <div class="page-intro"><div><h2 data-i18n="human_title">المراجعة البشرية</h2><p data-i18n="human_subtitle">اعتمد أو عدّل أو ارفض المهمة المقترحة مع تسجيل تعليقك.</p></div><span class="status-badge warning" id="pendingReviews">—</span></div>
+          <div id="humanTasks" class="task-list"></div>
+          <details class="surface technical-details"><summary data-i18n="view_audit">View technical audit log</summary><div id="auditLog" class="audit-log"></div></details>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <dialog id="textDialog"><div class="dialog-head"><h3 id="dialogTitle"></h3><button id="closeDialog" aria-label="Close">×</button></div><pre id="dialogText" dir="auto"></pre></dialog>
+  <div id="toast" role="status"></div>
+  <script src="/static/app.js?v=enterprise-1"></script>
+</body>
+</html>

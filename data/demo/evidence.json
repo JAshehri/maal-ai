@@ -1,0 +1,61 @@
+[
+  {
+    "evidence_id": "EV-NOX-S2-2026Q3",
+    "company_snapshot_id": "snapshot_demo_gci_2026_09",
+    "company_id": "company_demo_gci",
+    "evidence_type": "measurement",
+    "title": "Quarterly NOx measurement for S-2",
+    "content": "Approved synthetic measurement record for the demo.",
+    "asset_id": "S-2",
+    "observed_at": "2026-09-15T10:00:00+03:00",
+    "structured_data": {"pollutant": "NOx", "value": 90, "unit": "mg/Nm3", "measurement_basis": "dry gas at reference conditions", "averaging_period": "quarterly average"},
+    "source_quality": "approved_copy"
+  },
+  {
+    "evidence_id": "EV-SO2-S3-A",
+    "company_snapshot_id": "snapshot_demo_gci_2026_09",
+    "company_id": "company_demo_gci",
+    "evidence_type": "measurement",
+    "title": "SO2 reading A for S-3",
+    "content": "Synthetic laboratory record A.",
+    "asset_id": "S-3",
+    "observed_at": "2026-09-14T08:00:00+03:00",
+    "structured_data": {"pollutant": "SO2", "value": 175, "unit": "mg/Nm3", "measurement_basis": "dry gas at reference conditions", "averaging_period": "quarterly average"},
+    "source_quality": "approved_copy"
+  },
+  {
+    "evidence_id": "EV-SO2-S3-B",
+    "company_snapshot_id": "snapshot_demo_gci_2026_09",
+    "company_id": "company_demo_gci",
+    "evidence_type": "measurement",
+    "title": "SO2 reading B for S-3",
+    "content": "Synthetic laboratory record B conflicts with record A.",
+    "asset_id": "S-3",
+    "observed_at": "2026-09-14T08:00:00+03:00",
+    "structured_data": {"pollutant": "SO2", "value": 190, "unit": "mg/Nm3", "measurement_basis": "dry gas at reference conditions", "averaging_period": "quarterly average"},
+    "source_quality": "approved_copy"
+  },
+  {
+    "evidence_id": "EV-PM-S2-2026Q3",
+    "company_snapshot_id": "snapshot_demo_gci_2026_09",
+    "company_id": "company_demo_gci",
+    "evidence_type": "measurement",
+    "title": "Quarterly PM measurement for S-2",
+    "content": "Approved synthetic measurement record for the demo.",
+    "asset_id": "S-2",
+    "observed_at": "2026-09-15T10:00:00+03:00",
+    "structured_data": {"pollutant": "PM", "value": 40, "unit": "mg/Nm3", "measurement_basis": "dry gas at reference conditions", "averaging_period": "quarterly average"},
+    "source_quality": "approved_copy"
+  },
+  {
+    "evidence_id": "EV-PUBLICATION-2026",
+    "company_snapshot_id": "snapshot_demo_gci_2026_09",
+    "company_id": "company_demo_gci",
+    "evidence_type": "publication",
+    "title": "Annual environmental readings publication",
+    "content": "The synthetic company publishes ambient readings on its public demo website.",
+    "observed_at": "2026-08-01T12:00:00+03:00",
+    "structured_data": {"publication": true, "permission_record_search": "not located in demo repository"},
+    "source_quality": "approved_copy"
+  }
+]

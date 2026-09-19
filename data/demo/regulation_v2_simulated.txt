@@ -1,0 +1,11 @@
+DEMO DATA - THIS IS A SIMULATED CHANGE, NOT AN OFFICIAL UPDATE.
+Article 1 Scope: This simulated instrument applies to facilities operating stationary emission sources in the Kingdom.
+Article 2 Definitions: A stationary source means a fixed stack or chimney. Reference conditions mean dry gas at the documented reference temperature and pressure.
+Article 5.1 Emissions: A facility operating a stationary source must ensure the quarterly average NOx concentration does not exceed 80 mg/Nm3 on dry gas at reference conditions.
+Article 5.2 Emissions: A facility operating a stationary source must ensure the quarterly average SO2 concentration does not exceed 180 mg/Nm3 on dry gas at reference conditions.
+Article 5.3 Emissions: A facility operating a stationary source must ensure the quarterly average PM concentration does not exceed 50 mg/Nm3 on dry gas at reference conditions.
+Article 5.10 Publication: A facility publishing ambient air readings on a public website must obtain prior written permission for the publication.
+Article 7 Marine reporting: A facility performing marine discharge activity must submit an incident report within 15 days.
+Article 9 Records: All records shall be retained for audit!
+Article 10 Reduced monitoring: The authority may allow reduced monitoring where three consecutive years of qualifying evidence are available.
+Article 11 Emergency equipment: A facility operating emergency generators must test each generator annually.

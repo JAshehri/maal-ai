@@ -1,0 +1,11 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+maal.db
+maal.db-shm
+maal.db-wal
+work/rendered/
+work/extracted/
+

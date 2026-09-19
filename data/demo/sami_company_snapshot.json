@@ -1,0 +1,34 @@
+{
+  "company_snapshot_id": "snapshot_demo_sami_context_2026_09",
+  "company_id": "company_demo_sami_context",
+  "name": "ملف عرض اصطناعي لسياق صناعات متقدمة - لا يمثل بيانات SAMI الفعلية",
+  "captured_at": "2026-09-18T12:00:00+03:00",
+  "jurisdiction": "SA",
+  "activities": [
+    "advanced electronics",
+    "embedded systems",
+    "manufacturing",
+    "systems integration",
+    "procurement",
+    "quality assurance",
+    "data processing",
+    "operational technology"
+  ],
+  "assets": [
+    {"asset_id": "DEMO-OT-01", "type": "operational_technology", "name": "Synthetic manufacturing control environment"},
+    {"asset_id": "DEMO-IT-01", "type": "information_system", "name": "Synthetic enterprise information environment"}
+  ],
+  "policies": [],
+  "permits": [],
+  "attributes": {
+    "synthetic_demo": true,
+    "not_actual_sami_data": true,
+    "departments": ["Cybersecurity", "IT", "Engineering", "Quality", "Procurement", "Legal"],
+    "primary_jurisdiction": "SA",
+    "export_markets": ["DEMO-COUNTRY"],
+    "cloud_usage": null,
+    "critical_system_operator": null,
+    "processes_personal_or_sensitive_data": true,
+    "uses_operational_technology": true
+  }
+}

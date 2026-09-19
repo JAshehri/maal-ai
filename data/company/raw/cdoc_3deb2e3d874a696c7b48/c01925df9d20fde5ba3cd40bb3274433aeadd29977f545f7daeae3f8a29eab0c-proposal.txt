@@ -1,0 +1,6 @@
+DEMO NEW PROJECT PROPOSAL — SYNTHETIC COMPANY DATA
+Project: Advanced Manufacturing Expansion
+Department: Environmental Engineering
+Section 7.3 Emissions Design Basis
+The proposed stack design follows Article 5.1 and allows a quarterly average NOx concentration of 100 mg/Nm3 on dry gas at reference conditions.
+

@@ -1,0 +1,11 @@
+LEGACY DEMO INPUT - RETAINED FOR REFERENCE ONLY.
+The active structured demo inputs are under data/demo/. Expected outcomes are stored separately in eval/gold.jsonl.
+This file intentionally contains no labels such as "within limit" or "exceeds limit".
+
+COMPANY: Gulf Chemical Industries (fictional)
+SECTOR: Petrochemical intermediates manufacturing
+LOCATION: Jubail Industrial City, Saudi Arabia
+STATIONARY SOURCES: S-1, S-2, S-3
+MEASUREMENTS: values and units must be read from data/demo/evidence.json.
+PUBLICATION PRACTICE: environmental readings are published; a permission record was not located in the demo repository.
+IMPORTANT: not locating a record is not proof that it does not exist.

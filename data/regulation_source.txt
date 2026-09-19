@@ -1,0 +1,4 @@
+LEGACY DEMO EXTRACT - NOT AN OFFICIAL REGULATION AND NOT USED BY THE ACTIVE PIPELINE.
+The source text previously mixed unverified paraphrases, illustrative limits, and a contradictory OB-05 ALL/OR condition.
+Because the official clause and annexes were not supplied, OB-05 must remain unknown rather than being resolved by assumption.
+The active, explicitly simulated version pair is stored in data/demo/regulation_v1.txt and data/demo/regulation_v2_simulated.txt.

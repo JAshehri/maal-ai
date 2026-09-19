@@ -1,0 +1,25 @@
+{
+  "company_snapshot_id": "snapshot_demo_gci_2026_09",
+  "company_id": "company_demo_gci",
+  "name": "شركة الخليج للصناعات الكيميائية - بيانات افتراضية",
+  "captured_at": "2026-09-17T09:00:00+03:00",
+  "jurisdiction": "SA",
+  "activities": ["petrochemical intermediates manufacturing", "environmental reporting"],
+  "assets": [
+    {"asset_id": "S-1", "type": "stationary_source", "name": "Stack S-1"},
+    {"asset_id": "S-2", "type": "stationary_source", "name": "Stack S-2"},
+    {"asset_id": "S-3", "type": "stationary_source", "name": "Stack S-3"}
+  ],
+  "policies": [
+    {"policy_id": "POL-ENV-01", "title": "Environmental data publication procedure", "revision": 2}
+  ],
+  "permits": [
+    {"permit_id": "ENV-DEMO-1187", "type": "environmental", "status": "valid", "note": "Synthetic identifier"}
+  ],
+  "attributes": {
+    "stationary_sources_present": true,
+    "marine_discharge_activity": false,
+    "publishes_environmental_readings": true,
+    "emergency_generators_present": null
+  }
+}

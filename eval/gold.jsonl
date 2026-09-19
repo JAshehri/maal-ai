@@ -1,0 +1,6 @@
+{"case_id":"numeric_gap","input":"Article 5.1 plus EV-NOX-S2-2026Q3","expected":"gap","note":"Synthetic expected label, not a legal conclusion."}
+{"case_id":"supported_compliant","input":"Article 5.3 plus EV-PM-S2-2026Q3","expected":"supported_compliant","note":"Evidence-bound demo label."}
+{"case_id":"not_applicable","input":"Article 7 and marine_discharge_activity=false","expected":"not_applicable","note":"Explicit negative company fact."}
+{"case_id":"insufficient_evidence","input":"Article 5.10 with permission not located","expected":"insufficient_evidence","note":"Absence from repository is not proof of absence."}
+{"case_id":"conflicting_evidence","input":"Article 5.2 plus EV-SO2-S3-A/B","expected":"conflicting_evidence","note":"Two values for the same asset/time."}
+{"case_id":"editorial","input":"Article 9 punctuation only","expected":"editorial","note":"Must not trigger downstream assessment."}

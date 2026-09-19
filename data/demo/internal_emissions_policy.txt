@@ -1,0 +1,6 @@
+DEMO INTERNAL POLICY — SYNTHETIC COMPANY DATA
+Section 4.2 Emissions Control
+The quarterly average NOx concentration must not exceed 100 mg/Nm3 on dry gas at reference conditions.
+Responsible department: Environmental Engineering
+Dependent project: Advanced Manufacturing Expansion
+
