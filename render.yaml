@@ -15,9 +15,7 @@ services:
       - key: MAAL_LLM_PROVIDER
         value: deterministic
       - key: MAAL_AUTH_MODE
-        value: token
-      - key: MAAL_API_KEYS_JSON
-        sync: false
+        value: local
       - key: MAAL_DATABASE_PATH
         value: /tmp/maal/maal.db
       - key: MAAL_REGULATORY_STORAGE_DIR
