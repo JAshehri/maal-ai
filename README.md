@@ -4,12 +4,13 @@
 
 النسخة الحالية تستخدم آلة حالات دائمة واضحة بدل LangGraph. هذا قرار مقصود لتقليل اعتماديات الديمو مع الحفاظ على `thread_id` وcheckpoints والاستئناف ونقطة التوقف البشرية. يمكن استبدال المنسق لاحقًا دون تغيير عقود البيانات.
 
-## ما هو حقيقي وما هو محاكاة
+## وضع التشغيل الحقيقي ووضع العرض
 
 - حقيقي ومختبر حتميًا: تخزين النسخ والبصمات، استخراج المواد النصية، مقارنة النسخ، المقارنات الرقمية، حالات الانطباق والفجوة، منع التكرار، حفظ الحالة، المراجعة والإصدارات، وسجل التدقيق. ويشمل ذلك ingestion لملفات PDF/DOCX/XLSX/PPTX/TXT/CSV مع locators دقيقة، ومراجعة امتثال عند الطلب، وعلاقات أثر محفوظة في قاعدة البيانات.
 - حي ومختبر: موصلا NCA وSASO يقرآن الفهارس الرسمية، يحفظان الملفات الأصلية والبصمات والنسخ غير القابلة للاستبدال، ويعاملان إعادة المسح دون تغير كـ no-op.
-- محاكاة معلنة: سيناريو التغيير المقارن وملفا المنشأة والقياسات تحت `data/demo/`. ملف `sami_company_snapshot.json` سياق عرض اصطناعي ولا يمثل بيانات SAMI الفعلية.
-- محاكاة معلنة: مدخلات التعرض المالي (المعالجة، التأخير، التوقف، والعقد) اصطناعية للديمو. لا يعرض النظام عقوبة مباشرة إلا عند وجود citation رسمي؛ وإلا يعرض `Not enough data`.
+- الوضع الافتراضي حقيقي: `DEMO_MODE=false`. لا تُزرع لوائح أو ملفات منشأة أو نتائج أو قيم مالية اصطناعية عند بدء التطبيق. تبدأ قاعدة البيانات النظيفة بصفحة Onboarding ثم Dashboard فارغة حتى يشغّل المستخدم المسح الحي.
+- بيانات العرض باقية تحت `data/demo/` للاختبارات والعرض الاحتياطي فقط، ولا تُستخدم إلا عند ضبط `DEMO_MODE=true` صراحةً. ملف `sami_company_snapshot.json` اصطناعي ولا يمثل بيانات SAMI الفعلية.
+- لا يعرض الوضع الحقيقي تعرضًا ماليًا إلا من مدخلات شركة معتمدة أو citation رسمي. عند غيابها يعرض `Not enough data`.
 - اختياري وغير متحقق في هذه البيئة: استدعاء Anthropic الحي. الإعداد الافتراضي `deterministic`، وواجهة `LLMClient` موجودة لاستخدام المزود عند توفير المفتاح والاعتماديات.
 - لا يوجد بحث متجهي. يسترجع النظام مقاطع مواد وأدلة فعلية بالمعرفات والكلمات والحقول المنظمة؛ لذلك لا يدعي وجود قاعدة vector أو تدريب نموذج جديد.
 
@@ -21,6 +22,7 @@
 ├── migrations/001_initial.sql   # مخطط منصة التحليل
 ├── migrations/002_platform_expansion.sql # سجل المصادر والمسح وExport/GRC
 ├── migrations/003_core_differentiators.sql # مستندات المنشأة والاعتماد والمراجعة والتعرض
+├── migrations/004_real_company_onboarding.sql # ملف الشركة المنسخ والنطاق وأدلة الاستخراج
 ├── src/
 │   ├── schemas.py               # عقود Source إلى RunState
 │   ├── settings.py              # إعدادات ومسارات وتحميل .env
@@ -33,6 +35,7 @@
 │   ├── pipeline.py              # آلة الحالات وcheckpoints والاستئناف
 │   ├── company_documents.py     # استخراج متعدد الصيغ مع page/section/slide/sheet/cell/line
 │   ├── compliance_review.py     # مراجعة عند الطلب وwatch window وdependency graph والتعرض
+│   ├── onboarding.py            # استخراج ملف الشركة والنطاق الإلزامي والمراجعة والاعتماد
 │   ├── review_service.py        # قبول وتعديل ورفض مع revision
 │   ├── regulatory/              # NCA وSASO وManual Export/قطاع
 │   ├── grc.py                   # GRCIntegrationService وLocal adapter
@@ -92,6 +95,13 @@ uvicorn app:app --reload --port 8000
 - توثيق API: `http://127.0.0.1:8000/docs`
 - الجاهزية: `http://127.0.0.1:8000/ready`
 
+التشغيل العادي لا يحتاج تعديلًا لأن `.env.example` يضبط `DEMO_MODE=false`. لتشغيل العرض الاحتياطي فقط:
+
+```powershell
+$env:DEMO_MODE="true"
+uvicorn app:app --reload --port 8000
+```
+
 الأدوار تمر في رؤوس الديمو: `X-Role: admin|analyst|reviewer` و`X-User-Id`. عند وضع `MAAL_API_TOKEN` يجب إرسال `X-API-Token` أيضًا. هذا RBAC أساسي للديمو، وليس بديلًا عن SSO في الإنتاج.
 
 ## نقاط API
@@ -107,6 +117,10 @@ uvicorn app:app --reload --port 8000
 - `GET /health` للبقاء و`GET /ready` للجاهزية.
 - `GET /regulatory-sources` و`GET /regulatory-documents` لسجل المصادر والوثائق.
 - `POST /regulatory-scans` يعيد `202`، و`GET /regulatory-scans/{id}` يعرض التقدم والنتائج.
+- `GET /onboarding/status` يعيد حالة إعداد الشركة أو Empty State الحقيقي.
+- `POST /onboarding/documents` يقبل ملفات متعددة ويستخرج facts مع المصدر والموضع والثقة والطريقة.
+- `POST /onboarding/{company_id}/approve` يعتمد النسخة والنطاق مع حماية المجالات الإلزامية.
+- `GET /ui/live-overview` يعيد View Model من بيانات الشركة والمسح الحي فقط، دون Demo fallback.
 - `GET /regulatory-scans/{id}/changes` و`GET /dashboard/summary` للعرض والتقارير.
 - `POST /export-sector/manual` و`POST /export-sector/manual/upload` للإدخال اليدوي الموثق فقط.
 - `POST /grc/tasks` و`POST /grc/tasks/{id}/status` لمحول GRC المحلي التجريبي.
@@ -116,7 +130,7 @@ uvicorn app:app --reload --port 8000
 - `GET /compliance-reviews/{id}` للنتيجة والـscore والاستشهاد والتعرض.
 - `GET /compliance-reviews/{id}/report` يجمع نتيجة المراجعة مع impact graph والتوضيحات.
 - `GET /impact-graph` لسلسلة `Regulation → Article → Obligation → Internal Document → Section → Department → Project` المخزنة فعليًا.
-- `GET /ui/overview` يعيد View Model منقحًا للواجهة المؤسسية دون تغيير منطق التحليل أو عرض المعرفات الداخلية.
+- `GET /ui/overview` خاص بوضع `DEMO_MODE=true` ويرجع 404 في الوضع العادي.
 
 ## الواجهة المؤسسية
 
@@ -136,17 +150,20 @@ $body = @{
 Invoke-RestMethod http://127.0.0.1:8000/runs -Method Post -Headers $headers -ContentType "application/json" -Body $body
 ```
 
-## سيناريو الديمو المقترح
+## سيناريو التشغيل الحقيقي
 
-1. افتح الواجهة؛ تعرض سلسلة الاعتماد المحفوظة من المصدر حتى مشروع `Advanced Manufacturing Expansion` والسياسة الداخلية والسطر 3.
-2. شغّل التحليل المحاكى واعرض تغير NOx من 100 إلى 80 والمادة 5.1 ونافذة المراقبة 30 يومًا.
-3. في قسم On-Demand Review ارفع `data/demo/new_project_proposal.txt`.
-4. اعرض تحذير `Recently superseded requirement detected` وscore = 0% والموضع الدقيق (السطر 5).
-5. اعرض نص المشروع 100، والاستشهاد الحالي 80، والتعديل المقترح، والقسم والمشروع في dependency graph.
-6. اعرض التعرض: remediation 120,000 + delay 150,000 + downtime 40,000 + contract 75,000 = 385,000 SAR. وضّح أن المدخلات اصطناعية وأن direct penalty هي `Not enough data`.
-7. اختياريًا اعرض رحلة المهمة البشرية ومسار التدقيق. NCA/SASO مكتملان للـMVP ولا يلزم تشغيل scan حي أثناء عرض الـcore.
+1. افتح قاعدة بيانات نظيفة؛ تظهر صفحة Onboarding بدل Dashboard.
+2. ارفع عدة ملفات PDF/DOCX/XLSX/PPTX/TXT/CSV تصف الشركة.
+3. راجع facts المستخرجة وأدلتها والـRegulatory Scope؛ المجالات الإلزامية لا يمكن للمحلل حذفها.
+4. اعتمد ملف الشركة؛ تظهر Dashboard فارغة من اللوائح والقيم المصطنعة.
+5. اضغط **تحديث البيانات التنظيمية**؛ ينشئ الزر `POST /regulatory-scans` ويشغّل NCA وSASO فقط.
+6. راجع New / Updated / Unchanged / Filtered / Needs Review / Errors ووقت آخر تحديث.
+7. أعد التحديث دون تغير؛ يجب أن تظهر النتائج `Unchanged` ورسالة عدم وجود تحديثات جديدة دون إنشاء تغيير وهمي.
 
 ## الضوابط والقرارات الهندسية
+
+مرجع إغلاق قسم المنتج: [docs/MAAL_PRODUCT_DEFINITION_AND_ROADMAP_AR.md](docs/MAAL_PRODUCT_DEFINITION_AND_ROADMAP_AR.md).
+مرجع دور AI والأمن والخصوصية: [docs/MAAL_AI_SECURITY_OPERATING_MODEL_AR.md](docs/MAAL_AI_SECURITY_OPERATING_MODEL_AR.md).
 
 - الوثائق التنظيمية تعامل كبيانات غير موثوقة، ولا تنفذ تعليماتها. يوجد اختبار حقن صريح.
 - لا تتحول ثقة النموذج إلى احتمال صحة. تعرض النتيجة جودة المصدر وحداثة الدليل وصحة الاستشهاد وكفاية الانطباق منفصلة.
@@ -156,6 +173,8 @@ Invoke-RestMethod http://127.0.0.1:8000/runs -Method Post -Headers $headers -Con
 - المهمة تنشأ فقط عندما تكون الحالة `gap`؛ ولا تنشأ لـ`unknown` أو نقص أو تعارض الأدلة.
 - كل نتيجة تحمل التشغيل والمنشأة والمصدر والنسخة والنموذج وإصداري prompt وschema.
 - CORS مقيد افتراضيًا بعناوين الواجهة المحلية الموجودة في `.env.example`.
+- `GET /system/capabilities` يعرض مرحلة المنتج والميزات الحقيقية وسياسة AI وحالة المصادقة دون مفاتيح أو معرفات داخلية.
+- وضع `local` يتطلب هوية مستخدم صريحة. للـPilot استخدم `MAAL_AUTH_MODE=token` ومفاتيح مربوطة بهوية ودور؛ هذا لا يغني عن SSO في الإنتاج.
 
 ## القيود الحالية وخارطة التوسع
 

@@ -6,13 +6,31 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 from . import db
+from .arabic_processing import (
+    ARABIC_LEGAL_ARTICLE_PATTERN,
+    extract_canonical_article_number,
+    process_text,
+)
 from .schemas import Clause, DocumentVersion, DocumentVersionCreate
 
 
+# نمط متقدم يجمع الترقيم الإنجليزي والعربي للمواد والبنود القانونية
 ARTICLE_PATTERN = re.compile(
-    r"^(?P<ref>(?:Article|Section|Clause|المادة|القسم)\s+[\w.-]+)(?:\s*[-–—:]\s*|\s+)(?P<body>.*)$",
+    r"^(?P<ref>"
+    r"(?:Article|Section|Clause)\s*(?:\([\d٠-٩.-]+\)|[\d٠-٩.-]+)"
+    r"|"
+    r"(?:المادة|القسم|البند|الفقرة)\s*(?:\([\d٠-٩.-]+\)|[\d٠-٩.-]+|"
+    r"(?:الاولى|الاول|الثانية|الثاني|الثالثة|الثالث|الرابعة|الرابع|"
+    r"الخامسة|الخامس|السادسة|السادس|السابعة|السابع|الثامنة|الثامن|"
+    r"التاسعة|التاسع|العاشرة|العاشر|الحادية عشرة|الحادي عشر|"
+    r"الثانية عشرة|الثاني عشر))"
+    r"|"
+    r"(?:أولاً|ثانياً|ثالثاً|رابعاً|خامساً|سادساً|سابعاً|ثامناً|تاسعاً|عاشراً)"
+    r")"
+    r"(?:\s*[-–—:]\s*|\s+|$)(?P<body>.*)$",
     re.IGNORECASE | re.MULTILINE,
 )
+
 INJECTION_MARKERS = (
     "ignore previous instructions",
     "reveal the api key",
@@ -39,6 +57,7 @@ def extract_clauses(version_id: str, content: str) -> list[Clause]:
     text = normalize_text(content)
     matches = list(ARTICLE_PATTERN.finditer(text))
     if not matches:
+        processed = process_text(text)
         return [Clause(
             clause_id=db.stable_id("clause", version_id, "Document", sha256_text(text)),
             version_id=version_id,
@@ -47,6 +66,9 @@ def extract_clauses(version_id: str, content: str) -> list[Clause]:
             start_offset=0,
             end_offset=len(text),
             text_sha256=sha256_text(text),
+            raw_text=text,
+            normalized_text=processed.normalized_text,
+            language=processed.language,
         )]
     clauses: list[Clause] = []
     for index, match in enumerate(matches):
@@ -54,6 +76,7 @@ def extract_clauses(version_id: str, content: str) -> list[Clause]:
         end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
         raw = text[start:end].strip()
         article_ref = match.group("ref").strip()
+        processed = process_text(raw)
         clauses.append(Clause(
             clause_id=db.stable_id("clause", version_id, article_ref, sha256_text(raw)),
             version_id=version_id,
@@ -62,6 +85,9 @@ def extract_clauses(version_id: str, content: str) -> list[Clause]:
             start_offset=start,
             end_offset=end,
             text_sha256=sha256_text(raw),
+            raw_text=raw,
+            normalized_text=processed.normalized_text,
+            language=processed.language,
         ))
     return clauses
 
@@ -91,6 +117,7 @@ def register_document_version(
         supersedes_version_id=payload.supersedes_version_id,
         is_simulated=payload.is_simulated,
         simulation_notice=payload.simulation_notice,
+        legal_status="effective",
     )
     stored = db.insert_document_version(version, db_path)
     clauses = extract_clauses(stored.version_id, stored.content)

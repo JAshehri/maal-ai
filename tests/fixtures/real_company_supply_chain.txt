@@ -1,0 +1,3 @@
+Suppliers: electronic component suppliers, local logistics provider
+The company has suppliers and a managed supply chain.
+Import and export activity is not confirmed in this document.

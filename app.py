@@ -10,9 +10,11 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from src import db
-from src.demo import seed_demo
+from src.ai_policy import ai_operating_posture, product_capabilities
+from src.auth import AuthenticationFailure, authenticate, authentication_posture
 from src.company_documents import ingest_company_document
 from src.compliance_review import create_compliance_review, impact_graph, seed_core_demo, ui_overview
+from src.onboarding import approve_profile, create_profile_from_documents, get_onboarding, live_ui_overview, seed_regulatory_domains
 from src.generate_report import generate_report
 from src.ingestion import register_document_version
 from src.pipeline import create_run, execute_run
@@ -22,7 +24,7 @@ from src.regulatory.manual import register_manual_export_regulation
 from src.regulatory.registry import seed_regulatory_sources
 from src.review_service import ReviewForbidden, RevisionConflict, review_task
 from src.schemas import (
-    ComplianceReviewCreate, DocumentVersionCreate, ExportSectorRegulationCreate, GRCTaskCreate,
+    CompanyProfileApproval, ComplianceReviewCreate, DocumentVersionCreate, ExportSectorRegulationCreate, GRCTaskCreate,
     RegulatoryScanCreate, ReviewRequest, RunCreate, Source, SourceCreate,
 )
 from src.settings import settings
@@ -31,9 +33,10 @@ from src.settings import settings
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     db.init_db()
-    seed_demo()
     seed_regulatory_sources()
-    seed_core_demo()
+    seed_regulatory_domains()
+    if settings.demo_mode:
+        seed_core_demo()
     yield
 
 
@@ -61,12 +64,16 @@ def require_roles(*allowed: str) -> Callable:
         x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
         x_api_token: Annotated[str | None, Header(alias="X-API-Token")] = None,
     ) -> tuple[str, str]:
-        role = x_role or ""
-        if role not in allowed:
-            raise HTTPException(status_code=403, detail=f"role must be one of {allowed}")
-        if settings.api_token and x_api_token != settings.api_token:
-            raise HTTPException(status_code=401, detail="invalid API token")
-        return x_user_id or f"demo-{role}", role
+        try:
+            identity = authenticate(
+                allowed_roles=allowed,
+                x_role=x_role,
+                x_user_id=x_user_id,
+                x_api_token=x_api_token,
+            )
+        except AuthenticationFailure as exc:
+            raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        return identity.user_id, identity.role
     return dependency
 
 
@@ -85,11 +92,37 @@ def ready(response: Response) -> dict:
     if not db.healthcheck():
         response.status_code = 503
         return {"status": "not_ready", "database": "unavailable"}
-    return {"status": "ready", "database": "ok", "worker": "in_process_demo"}
+    return {
+        "status": "ready",
+        "database": "ok",
+        "worker": "in_process",
+        "mode": "demo" if settings.demo_mode else "live_company_data",
+    }
+
+
+@app.get("/system/capabilities")
+def system_capabilities(
+    _: tuple[str, str] = Depends(require_roles("analyst", "reviewer", "admin")),
+) -> dict:
+    """Expose actual product/AI posture without secrets or internal identifiers."""
+    return {
+        "product": product_capabilities(),
+        "ai": ai_operating_posture(),
+        "security": {
+            "authentication": authentication_posture(),
+            "cors_restricted": True,
+            "immutable_regulatory_versions": True,
+            "prompt_injection_detection": True,
+            "data_retention_days": settings.data_retention_days or None,
+            "retention_automation_configured": settings.data_retention_days > 0,
+        },
+    }
 
 
 @app.get("/demo/context")
 def demo_context(_: tuple[str, str] = Depends(require_roles("analyst", "reviewer", "admin"))) -> dict:
+    if not settings.demo_mode:
+        raise HTTPException(status_code=404, detail="demo mode is disabled")
     return seed_core_demo()
 
 
@@ -97,6 +130,8 @@ def demo_context(_: tuple[str, str] = Depends(require_roles("analyst", "reviewer
 def demo_project_proposal(
     _: tuple[str, str] = Depends(require_roles("analyst", "reviewer", "admin")),
 ) -> FileResponse:
+    if not settings.demo_mode:
+        raise HTTPException(status_code=404, detail="demo mode is disabled")
     return FileResponse(
         settings.root_dir / "data" / "demo" / "new_project_proposal.txt",
         media_type="text/plain; charset=utf-8",
@@ -108,7 +143,65 @@ def demo_project_proposal(
 def get_ui_overview(
     _: tuple[str, str] = Depends(require_roles("analyst", "reviewer", "admin")),
 ) -> dict:
+    if not settings.demo_mode:
+        raise HTTPException(status_code=404, detail="demo mode is disabled")
     return ui_overview()
+
+
+@app.get("/onboarding/status")
+def onboarding_status(
+    company_id: str | None = None,
+    _: tuple[str, str] = Depends(require_roles("analyst", "reviewer", "admin")),
+) -> dict:
+    return get_onboarding(company_id)
+
+
+@app.post("/onboarding/documents", status_code=201)
+async def onboarding_documents(
+    company_name: str = Form(...),
+    files: list[UploadFile] = File(...),
+    _: tuple[str, str] = Depends(require_roles("analyst", "admin")),
+) -> dict:
+    uploaded: list[tuple[str, str, bytes]] = []
+    for file in files:
+        content = await file.read(settings.max_regulatory_document_bytes + 1)
+        if len(content) > settings.max_regulatory_document_bytes:
+            raise HTTPException(status_code=413, detail=f"file exceeds configured size limit: {file.filename}")
+        uploaded.append((file.filename or "upload.bin", file.content_type or "application/octet-stream", content))
+    try:
+        return create_profile_from_documents(company_name=company_name, files=uploaded)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/onboarding/{company_id}/approve")
+def approve_company_profile(
+    company_id: str,
+    payload: CompanyProfileApproval,
+    identity: tuple[str, str] = Depends(require_roles("analyst", "admin")),
+) -> dict:
+    _, role = identity
+    try:
+        return approve_profile(company_id, expected_version=payload.expected_version,
+                               profile_edits=payload.profile_edits,
+                               scope_updates=[item.model_dump() for item in payload.scope_updates], role=role)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="company profile not found") from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/ui/live-overview")
+def get_live_ui_overview(
+    company_id: str,
+    _: tuple[str, str] = Depends(require_roles("analyst", "reviewer", "admin")),
+) -> dict:
+    try:
+        return live_ui_overview(company_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @app.post("/company-documents/upload", status_code=201)

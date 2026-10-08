@@ -53,7 +53,29 @@ def classify_discovered_document(
             "Data Cybersecurity Controls": ("data", "بيانات", "privacy", "خصوص"),
         }
         required = conditions.get(document.category or "")
-        if required and not any(token in company for token in required):
+        is_essential = document.category == "Essential Cybersecurity Controls"
+        essential_scope_proven = any(
+            token in company
+            for token in (
+                "critical system",
+                "critical_system",
+                "operates_critical",
+                "critical infrastructure",
+                "government entity",
+                "government agency",
+                "جهة حكومية",
+                "أنظمة حساسة",
+                "بنية تحتية حرجة",
+            )
+        )
+        if is_essential and not essential_scope_proven:
+            return DiscoveryApplicability(
+                "needs_review",
+                "وجود أنظمة معلومات لا يثبت وحده خضوع المنشأة للنطاق الملزم للضوابط الأساسية؛ يلزم تأكيد صفة الجهة أو البنية التحتية الحرجة.",
+                departments,
+                "pending_review",
+            )
+        if required and not is_essential and not any(token in company for token in required):
             return DiscoveryApplicability(
                 "needs_review",
                 f"وثيقة NCA رسمية، لكن ملف المنشأة لا يثبت شرط {document.category} بما يكفي.",
@@ -61,7 +83,7 @@ def classify_discovered_document(
                 "pending_review",
             )
         return DiscoveryApplicability(
-            "applicable" if required else "potentially_applicable",
+            "applicable" if required or essential_scope_proven else "potentially_applicable",
             "المنشأة سعودية ونشاطها التقني/الصناعي يتقاطع مع نطاق وثيقة NCA، مع بقاء الحكم التفصيلي للمواد.",
             departments + (["Engineering"] if document.category == "Operational Technology Cybersecurity Controls" else []),
             "high" if document.category in {"Critical Systems Cybersecurity Controls", "Operational Technology Cybersecurity Controls"} else "medium",
@@ -78,8 +100,8 @@ def classify_discovered_document(
             "Services": ["Quality", "Legal", "Procurement"],
         }.get(document.category or "", ["Legal", "Quality"])
         if company_relevant and relevant_category:
-            # Category alone is not evidence of product scope.  Keep this list
-            # intentionally narrow for the synthetic advanced-electronics profile;
+            # Category alone is not evidence of product scope. Keep this list
+            # intentionally narrow for an evidenced electronics company profile;
             # generic vehicles, tanks and machinery must not enter impact analysis.
             direct_keywords = (
                 "إلكترون", "electronic", "كهربائ", "electrical", "اتصالات",
@@ -105,7 +127,7 @@ def classify_discovered_document(
                 )
             return DiscoveryApplicability(
                 "applicable",
-                "عنوان اللائحة مرتبط مباشرة بالإلكترونيات أو الأجهزة أو المكونات المذكورة في ملف المنشأة التجريبي.",
+                "عنوان اللائحة مرتبط مباشرة بالإلكترونيات أو الأجهزة أو المكونات المثبتة في ملف المنشأة المعتمد.",
                 departments,
                 "high" if document.category == "Electrical" else "medium",
             )

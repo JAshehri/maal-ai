@@ -24,11 +24,32 @@ class SourceQuality(str, Enum):
 class ChangeType(str, Enum):
     added = "added"
     deleted = "deleted"
+    removed = "removed"
     numeric_threshold = "numeric_threshold"
+    numeric_threshold_changed = "numeric_threshold_changed"
     deadline = "deadline"
+    deadline_changed = "deadline_changed"
     scope = "scope"
+    scope_changed = "scope_changed"
+    responsibility_changed = "responsibility_changed"
+    evidence_requirement_changed = "evidence_requirement_changed"
+    effective_date_changed = "effective_date_changed"
     editorial = "editorial"
+    editorial_only = "editorial_only"
     modified = "modified"
+    unknown = "unknown"
+
+
+class LegalStatus(str, Enum):
+    draft = "draft"
+    published = "published"
+    effective = "effective"
+    amended = "amended"
+    superseded = "superseded"
+    repealed = "repealed"
+    expired = "expired"
+    unknown = "unknown"
+
 
 
 class ApplicabilityStatus(str, Enum):
@@ -130,6 +151,10 @@ class DocumentVersion(StrictModel):
     mime_type: str | None = None
     original_filename: str | None = None
     source_last_modified_at: datetime | None = None
+    legal_status: str = "effective"
+    enforcement_date: date | None = None
+    repealed_date: date | None = None
+    grace_period_days: int = 0
 
 
 class Clause(StrictModel):
@@ -142,6 +167,9 @@ class Clause(StrictModel):
     start_offset: int
     end_offset: int
     text_sha256: str
+    raw_text: str | None = None
+    normalized_text: str | None = None
+    language: str = "ar"
 
 
 class RegulatoryChange(StrictModel):
@@ -337,6 +365,10 @@ class RegulatoryDocument(StrictModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     discovered_at: datetime = Field(default_factory=utc_now)
     updated_at: datetime = Field(default_factory=utc_now)
+    publication_date_text: str | None = None
+    mandatory_application_date_text: str | None = None
+    hijri_date: str | None = None
+    calendar_type: str = "gregorian"
 
 
 class FetchedDocument(StrictModel):
@@ -404,6 +436,10 @@ class CompanyDocumentChunk(StrictModel):
     section_ref: str | None = None
     text: str
     text_sha256: str
+    raw_text: str | None = None
+    normalized_text: str | None = None
+    language: str = "ar"
+    extraction_quality: str = "extraction_success"
 
 
 class CompanyDocument(StrictModel):
@@ -426,6 +462,8 @@ class ComplianceReviewCreate(StrictModel):
     company_document_id: str
     company_snapshot_id: str
     idempotency_key: str = Field(min_length=8, max_length=120)
+    as_of_date: date | None = None
+    review_mode: Literal["current", "historical_as_of"] = "current"
 
 
 class DocumentDependencyCreate(StrictModel):
@@ -440,6 +478,10 @@ class DocumentDependencyCreate(StrictModel):
     department: str
     project_id: str | None = None
     relationship_type: Literal["implements", "references", "depends_on", "superseded_reference"] = "depends_on"
+    matching_method: str = "exact_reference"
+    confidence: float = 1.0
+    rationale: str = ""
+
 
 
 class FinancialInput(StrictModel):
@@ -453,3 +495,14 @@ class FinancialInput(StrictModel):
     contract_exposure: float | None = Field(default=None, ge=0)
     is_synthetic: bool = True
     label: str
+
+
+class ScopeUpdate(StrictModel):
+    code: str
+    status: Literal["confirmed", "proposed", "needs_confirmation", "removed"]
+
+
+class CompanyProfileApproval(StrictModel):
+    expected_version: int = Field(ge=1)
+    profile_edits: dict[str, list[str]] = Field(default_factory=dict)
+    scope_updates: list[ScopeUpdate] = Field(default_factory=list)

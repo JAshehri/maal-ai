@@ -42,6 +42,8 @@ class Settings:
         if item.strip()
     )
     api_token: str | None = os.getenv("MAAL_API_TOKEN") or None
+    auth_mode: str = os.getenv("MAAL_AUTH_MODE", "local")
+    api_keys_json: str = os.getenv("MAAL_API_KEYS_JSON", "")
     prompt_version: str = "maal-prompts-1.0"
     schema_version: str = "2.0"
     pipeline_version: str = "maal-state-machine-2.0"
@@ -56,6 +58,9 @@ class Settings:
     max_regulatory_document_bytes: int = int(
         os.getenv("MAAL_MAX_REGULATORY_DOCUMENT_BYTES", str(25 * 1024 * 1024))
     )
+    llm_max_input_chars: int = int(os.getenv("MAAL_LLM_MAX_INPUT_CHARS", "120000"))
+    data_retention_days: int = max(0, int(os.getenv("MAAL_DATA_RETENTION_DAYS", "0")))
+    demo_mode: bool = os.getenv("DEMO_MODE", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 
 settings = Settings()

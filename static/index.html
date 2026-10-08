@@ -3,10 +3,36 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,"><title>مآل | منصة الامتثال التنظيمي</title>
-  <link rel="stylesheet" href="/static/styles.css?v=enterprise-1">
+  <link rel="stylesheet" href="/static/styles.css?v=live-company-1">
 </head>
 <body>
-  <div class="app-shell">
+  <section id="accessRoot" class="access-shell">
+    <form id="accessForm" class="surface access-card">
+      <div class="brand access-brand"><span class="brand-mark">م</span><div><strong>مآل</strong><small>Maal Compliance</small></div></div>
+      <h1>الدخول إلى مساحة العمل</h1>
+      <p>أدخل مفتاح الوصول الخاص بالمنصة. لا يُحفظ المفتاح بعد إغلاق المتصفح.</p>
+      <label class="field-label"><span>مفتاح الوصول / Access key</span><input id="accessToken" type="password" autocomplete="current-password" required></label>
+      <button class="primary-action full-button" type="submit">دخول / Sign in</button>
+      <small id="accessError" class="access-error" hidden>تعذر التحقق من مفتاح الوصول.</small>
+    </form>
+  </section>
+  <section id="onboardingRoot" class="onboarding-shell" hidden>
+    <header class="onboarding-header"><div class="brand onboarding-brand"><span class="brand-mark">م</span><div><strong>مآل</strong><small>Maal Compliance</small></div></div><div class="language-toggle" role="group" aria-label="Language"><button data-lang="ar" class="active">العربية</button><button data-lang="en">English</button></div></header>
+    <main class="onboarding-main">
+      <section id="onboardingUpload" class="onboarding-step">
+        <span class="onboarding-kicker" data-i18n="onboarding_kicker">إعداد مساحة العمل</span><h1 data-i18n="onboarding_title">عرّف مآل على شركتك</h1><p data-i18n="onboarding_intro">ارفع عدة ملفات تصف أنشطة الشركة ومنتجاتها وسياساتها. لن يستنتج النظام حقيقة دون دليل داخل ملف.</p>
+        <article class="surface onboarding-card"><label class="field-label"><span data-i18n="company_name">اسم الشركة</span><input id="companyName" data-i18n-placeholder="company_name_placeholder" placeholder="اسم المنشأة الرسمي"></label><label id="onboardingDrop" class="drop-zone onboarding-drop" for="onboardingFiles"><input id="onboardingFiles" type="file" multiple accept=".pdf,.docx,.xlsx,.pptx,.txt,.csv"><strong data-i18n="onboarding_drop">اسحب ملفات الشركة هنا أو اختر عدة ملفات</strong><span data-i18n="onboarding_examples">السياسات، الإجراءات، العقود، المواصفات، ملفات الموارد البشرية والمشاريع</span><small>PDF, DOCX, XLSX, PPTX, TXT, CSV</small></label><div id="onboardingFileList" class="file-list"></div><button id="analyzeCompany" class="primary-action full-button" disabled data-i18n="analyze_company">تحليل ملفات الشركة</button></article>
+      </section>
+      <section id="onboardingReview" class="onboarding-step" hidden>
+        <span class="onboarding-kicker" data-i18n="review_profile_kicker">مراجعة قبل الاعتماد</span><h1 data-i18n="review_profile_title">راجع ملف الشركة والنطاق التنظيمي</h1><p data-i18n="review_profile_intro">صحح المعلومات أو أضف نطاقًا اختياريًا. المجالات الإلزامية لا تُحذف دون صلاحية مسؤول.</p>
+        <div class="profile-review-grid"><article class="surface"><h2 data-i18n="company_profile">ملف الشركة</h2><div id="profileFields" class="profile-fields"></div></article><article class="surface"><div class="surface-head"><div><h2 data-i18n="regulatory_scope">النطاق التنظيمي</h2><p data-i18n="scope_explainer">Company-Inferred + Mandatory Baseline + User-Confirmed</p></div></div><div id="scopeReview" class="scope-list"></div><div class="scope-add"><select id="addScopeSelect"></select><button id="addScopeButton" class="secondary-action" data-i18n="add_domain">إضافة مجال</button></div></article></div>
+        <div class="onboarding-footer"><button id="backToUpload" class="secondary-action" data-i18n="upload_more">رفع ملفات أخرى</button><button id="approveProfile" class="primary-action" data-i18n="approve_profile">اعتماد ملف الشركة</button></div>
+      </section>
+      <div id="onboardingProgress" class="progress-note" hidden></div>
+    </main>
+  </section>
+
+  <div id="appShell" class="app-shell" hidden>
     <aside class="sidebar">
       <div class="brand"><span class="brand-mark">م</span><div><strong>مآل</strong><small>Maal Compliance</small></div></div>
       <nav class="main-nav" aria-label="Primary navigation">
@@ -24,18 +50,21 @@
       <header class="topbar">
         <button id="menuButton" class="menu-button" aria-label="Menu">☰</button>
         <div><p class="workspace-label" data-i18n="workspace">مساحة العمل</p><h1 id="pageTitle">لوحة المتابعة</h1></div>
-        <div class="topbar-actions"><span class="demo-label" data-i18n="demo_data">بيانات عرض اصطناعية</span><div class="language-toggle" role="group" aria-label="Language"><button data-lang="ar" class="active">العربية</button><button data-lang="en">English</button></div></div>
+        <div class="topbar-actions"><span class="demo-label" data-i18n="live_data">بيانات الشركة والمصادر الرسمية</span><div class="language-toggle" role="group" aria-label="Language"><button data-lang="ar" class="active">العربية</button><button data-lang="en">English</button></div></div>
       </header>
 
       <main class="content">
         <section class="page active" id="page-dashboard">
           <div class="page-intro"><div><h2 data-i18n="dashboard_title">نظرة عامة على الامتثال</h2><p data-i18n="dashboard_subtitle">ملخص التغييرات التنظيمية والأثر التشغيلي الحالي.</p></div><button class="primary-action" id="refreshDashboard" data-i18n="refresh">تحديث البيانات</button></div>
-          <div class="kpi-grid">
-            <article class="kpi-card"><span data-i18n="reg_updates">تحديثات تنظيمية</span><strong id="kpiUpdates">—</strong><small data-i18n="verified_changes">تغييرات موثقة</small></article>
-            <article class="kpi-card critical"><span data-i18n="high_issues">قضايا عالية الأولوية</span><strong id="kpiHigh">—</strong><small data-i18n="requires_action">تحتاج إجراء</small></article>
-            <article class="kpi-card"><span data-i18n="affected_departments">الإدارات المتأثرة</span><strong id="kpiDepartments">—</strong><small data-i18n="traceable_departments">مرتبطة بالأثر</small></article>
-            <article class="kpi-card"><span data-i18n="estimated_exposure">التعرض المالي التقديري</span><strong id="kpiExposure">—</strong><small data-i18n="synthetic_estimate">تقدير من مدخلات ديمو</small></article>
+          <div class="kpi-grid six">
+            <article class="kpi-card"><span data-i18n="new_updates">تحديثات جديدة</span><strong id="kpiNew">—</strong></article>
+            <article class="kpi-card"><span data-i18n="updated_regulations">لوائح محدثة</span><strong id="kpiUpdated">—</strong></article>
+            <article class="kpi-card critical"><span data-i18n="high_issues">عالية الأولوية</span><strong id="kpiHigh">—</strong></article>
+            <article class="kpi-card"><span data-i18n="needs_review">تحتاج مراجعة</span><strong id="kpiNeedsReview">—</strong></article>
+            <article class="kpi-card"><span data-i18n="affected_departments">الإدارات المتأثرة</span><strong id="kpiDepartments">—</strong></article>
+            <article class="kpi-card"><span data-i18n="unconnected_domains">مجالات إلزامية غير متصلة</span><strong id="kpiUnconnected">—</strong></article>
           </div>
+          <article id="scanStatus" class="surface scan-status"><div class="empty-state"><p data-i18n="empty_regulatory">لا توجد بيانات تنظيمية بعد. اضغط تحديث البيانات لبدء المسح من المصادر الرسمية.</p></div></article>
           <div class="dashboard-grid">
             <article class="surface wide"><div class="surface-head"><div><h3 data-i18n="recent_changes">أحدث التغييرات التنظيمية</h3><p data-i18n="recent_changes_hint">التغييرات الأحدث ذات الصلة بالمنشأة</p></div><button class="text-button" data-open-page="analysis" data-i18n="view_analysis">فتح التحليل</button></div><div class="table-scroll"><table><thead><tr><th data-i18n="regulation">اللائحة</th><th data-i18n="article">المادة</th><th data-i18n="change">التغيير</th><th data-i18n="applicability">الانطباق</th><th data-i18n="priority">الأولوية</th></tr></thead><tbody id="recentChangesBody"></tbody></table></div></article>
             <article class="surface watch-card"><div class="surface-head"><div><h3 data-i18n="recent_30">تحديثات آخر 30 يومًا</h3><p data-i18n="watch_hint">متطلبات يجب مراقبتها عند رفع ملفات جديدة</p></div><span class="status-badge warning" id="watchCount">—</span></div><div id="watchList" class="watch-list"></div></article>
@@ -52,10 +81,10 @@
         </section>
 
         <section class="page" id="page-review">
-          <div class="page-intro"><div><h2 data-i18n="review_title">مراجعة امتثال ملف</h2><p data-i18n="review_subtitle">افحص سياسة أو عقدًا أو مقترح مشروع مقابل المتطلبات الحالية.</p></div><button id="demoReviewButton" class="secondary-action" data-i18n="try_sample">تجربة الملف الجاهز</button></div>
+          <div class="page-intro"><div><h2 data-i18n="review_title">مراجعة امتثال ملف</h2><p data-i18n="review_subtitle">افحص سياسة أو عقدًا أو مقترح مشروع مقابل المتطلبات الحالية.</p></div></div>
           <article class="surface upload-surface">
             <label id="dropZone" class="drop-zone" for="reviewFile"><input id="reviewFile" type="file" accept=".pdf,.docx,.xlsx,.pptx,.txt,.csv"><strong data-i18n="drop_title">اسحب الملف هنا أو اختره من جهازك</strong><span data-i18n="drop_formats">PDF, DOCX, XLSX, PPTX, TXT, CSV · حتى 25 MB</span><small id="selectedFile" data-i18n="no_file">لم يتم اختيار ملف</small></label>
-            <div class="form-row"><label><span data-i18n="department">الإدارة</span><input id="reviewDepartment" value="Environmental Engineering"></label><label><span data-i18n="project">المشروع</span><input id="reviewProject" value="Advanced Manufacturing Expansion"></label><button id="reviewSubmit" class="primary-action" disabled data-i18n="run_review">تشغيل المراجعة</button></div>
+            <div class="form-row"><label><span data-i18n="department">الإدارة</span><input id="reviewDepartment" placeholder="—"></label><label><span data-i18n="project">المشروع</span><input id="reviewProject" placeholder="—"></label><button id="reviewSubmit" class="primary-action" disabled data-i18n="run_review">تشغيل المراجعة</button></div>
           </article>
           <div id="reviewProgress" class="progress-note" hidden></div>
           <section id="reviewResults" hidden>
@@ -72,7 +101,7 @@
         <section class="page" id="page-financial">
           <div class="page-intro"><div><h2 data-i18n="financial_title">التعرض المالي</h2><p data-i18n="financial_subtitle">تقديرات حتمية مبنية على مدخلات الشركة المتاحة.</p></div><span class="estimate-label" data-i18n="estimated_financial_exposure">Estimated financial exposure</span></div>
           <div id="financialGrid" class="financial-grid"></div>
-          <article class="surface methodology"><h3 data-i18n="methodology">منهجية الحساب</h3><p data-i18n="methodology_text">تُحسب المكونات من مدخلات ديمو اصطناعية معلنة. لا تُعرض عقوبة تنظيمية مباشرة دون مصدر رسمي موثق.</p></article>
+          <article class="surface methodology"><h3 data-i18n="methodology">منهجية الحساب</h3><p data-i18n="methodology_text">تُحسب المكونات فقط من مدخلات شركة معتمدة. لا تُعرض عقوبة تنظيمية مباشرة دون مصدر رسمي موثق.</p></article>
         </section>
 
         <section class="page" id="page-human">
@@ -86,6 +115,6 @@
 
   <dialog id="textDialog"><div class="dialog-head"><h3 id="dialogTitle"></h3><button id="closeDialog" aria-label="Close">×</button></div><pre id="dialogText" dir="auto"></pre></dialog>
   <div id="toast" role="status"></div>
-  <script src="/static/app.js?v=enterprise-1"></script>
+  <script src="/static/app.js?v=live-company-1"></script>
 </body>
 </html>

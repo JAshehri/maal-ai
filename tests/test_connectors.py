@@ -8,12 +8,13 @@ import httpx
 
 from src import db
 from src.demo import seed_demo
+from src.regulatory.applicability import classify_discovered_document
 from src.regulatory.connectors.base import RegulatorySourceConnector
 from src.regulatory.connectors.nca import NCAConnector
 from src.regulatory.connectors.saso import SASOConnector
 from src.regulatory.discovery import create_regulatory_scan, execute_regulatory_scan
 from src.regulatory.registry import seed_regulatory_sources
-from src.schemas import FetchedDocument, RegulatoryDocument, RegulatoryScanCreate
+from src.schemas import CompanySnapshot, FetchedDocument, RegulatoryDocument, RegulatoryScanCreate
 
 
 class _FakeConnector(RegulatorySourceConnector):
@@ -29,8 +30,8 @@ class _FakeConnector(RegulatorySourceConnector):
         return [RegulatoryDocument(
             document_id=db.stable_id("regdoc", source_id, "https://nca.gov.sa/test"),
             source_id=source_id, authority="NCA", jurisdiction="SA",
-            regulatory_domain="Cybersecurity", title="Essential Cybersecurity Controls",
-            document_type="cybersecurity_controls", category="Essential Cybersecurity Controls",
+            regulatory_domain="Cybersecurity", title="Operational Technology Cybersecurity Controls",
+            document_type="cybersecurity_controls", category="Operational Technology Cybersecurity Controls",
             canonical_url="https://nca.gov.sa/test", download_url="https://nca.gov.sa/test.txt",
         )]
 
@@ -144,6 +145,32 @@ class ConnectorTests(unittest.TestCase):
         self.assertEqual({item.metadata["slug"] for item in documents}, {"ecc", "cscc", "ccc", "otcc", "dcc"})
         self.assertTrue(all(item.download_url and item.download_url.endswith(".pdf") for item in documents))
         self.assertTrue(all(item.last_modified_at for item in documents))
+
+    def test_nca_essential_controls_require_explicit_scope_evidence(self) -> None:
+        document = RegulatoryDocument(
+            document_id="regdoc_ecc", source_id="source_nca", authority="NCA",
+            jurisdiction="SA", regulatory_domain="Cybersecurity",
+            title="Essential Cybersecurity Controls", document_type="cybersecurity_controls",
+            category="Essential Cybersecurity Controls", canonical_url="https://nca.gov.sa/ecc",
+        )
+        generic_technology_company = CompanySnapshot(
+            company_snapshot_id="snapshot_generic", company_id="company_generic",
+            name="Technology Company", jurisdiction="SA", activities=["software engineering"],
+            assets=[], attributes={"uses_information_systems": True, "processes_personal_data": True},
+        )
+        scoped_company = generic_technology_company.model_copy(update={
+            "company_snapshot_id": "snapshot_critical",
+            "attributes": {"operates_critical_systems": True},
+        })
+
+        self.assertEqual(
+            classify_discovered_document(document, generic_technology_company).status,
+            "needs_review",
+        )
+        self.assertEqual(
+            classify_discovered_document(document, scoped_company).status,
+            "applicable",
+        )
 
     def test_saso_parses_dates_categories_and_expanded_page(self) -> None:
         initial = """<form><input name="__VIEWSTATE" value="x">

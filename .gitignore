@@ -8,4 +8,10 @@ maal.db-shm
 maal.db-wal
 work/rendered/
 work/extracted/
-
+data/company/onboarding/
+data/company/raw/
+data/regulatory/raw/
+work/*.db
+work/*.log
+work/regulatory_raw/
+work/pytest-*/

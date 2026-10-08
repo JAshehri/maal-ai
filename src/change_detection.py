@@ -5,29 +5,41 @@ import unicodedata
 from pathlib import Path
 
 from . import db
+from .arabic_processing import (
+    are_articles_equivalent,
+    extract_canonical_article_number,
+    extract_numbers_all_scripts,
+    normalize_arabic_letters,
+)
 from .schemas import ChangeType, Clause, RegulatoryChange
 
 
-NUMBER_RE = re.compile(r"(?<![\w.])-?\d+(?:\.\d+)?")
 PUNCT_RE = re.compile(r"[^\w\d]+", re.UNICODE)
-DEADLINE_WORDS = {"day", "days", "date", "deadline", "effective", "يوم", "أيام", "تاريخ", "مهلة"}
-SCOPE_WORDS = {"scope", "applies", "facility", "activity", "jurisdiction", "نطاق", "ينطبق", "منشأة", "نشاط"}
-THRESHOLD_WORDS = {"limit", "threshold", "maximum", "minimum", "mg", "ppm", "حد", "أقصى", "أدنى"}
+DEADLINE_WORDS = {"day", "days", "date", "deadline", "effective", "يوم", "أيام", "تاريخ", "مهلة", "سنة", "سنوات", "أشهر", "شهر"}
+SCOPE_WORDS = {"scope", "applies", "facility", "activity", "jurisdiction", "نطاق", "ينطبق", "منشأة", "نشاط", "استثناء", "تسري"}
+THRESHOLD_WORDS = {"limit", "threshold", "maximum", "minimum", "mg", "ppm", "حد", "أقصى", "أدنى", "نسبة", "معدل", "تركيز"}
+RESPONSIBILITY_WORDS = {"مسؤول", "مسؤولية", "جهة", "إدارة", "department", "officer", "authority", "responsibility", "ضابط", "لجنة"}
+EVIDENCE_WORDS = {"دليل", "سجل", "إثبات", "شهادة", "evidence", "certificate", "audit", "record", "توثيق", "مستند", "ترخيص"}
 
 
 def _semantic_tokens(text: str) -> list[str]:
-    normalized = unicodedata.normalize("NFKC", text).casefold()
+    normalized = normalize_arabic_letters(unicodedata.normalize("NFKC", text)).casefold()
     return [token for token in PUNCT_RE.sub(" ", normalized).split() if token]
 
 
 def _numbers(text: str | None) -> list[float]:
-    body = re.sub(r"^(?:Article|Section|Clause|المادة|القسم)\s+[\w.-]+", "", text or "", flags=re.IGNORECASE)
-    return [float(value) for value in NUMBER_RE.findall(body)]
+    body = re.sub(
+        r"^(?:Article|Section|Clause|المادة|القسم|البند|الفقرة)\s*(?:\([^)]+\)|[\w.-]+)?",
+        "",
+        text or "",
+        flags=re.IGNORECASE,
+    )
+    return extract_numbers_all_scripts(body)
 
 
 def _classify(before: str | None, after: str | None) -> tuple[ChangeType, bool, str]:
     if before is None:
-        return ChangeType.added, True, "أضيفت مادة جديدة."
+        return ChangeType.added, True, "أضيفت مادة جديدة في اللائحة."
     if after is None:
         return ChangeType.deleted, True, "حُذفت المادة من النسخة الجديدة."
     if before == after:
@@ -39,12 +51,16 @@ def _classify(before: str | None, after: str | None) -> tuple[ChangeType, bool, 
     token_set = set(old_tokens + new_tokens)
     if old_numbers != new_numbers:
         if token_set & DEADLINE_WORDS:
-            return ChangeType.deadline, True, f"تغيرت قيمة زمنية من {old_numbers} إلى {new_numbers}."
+            return ChangeType.deadline, True, f"تغيرت مهلة زمنية أو تاريخ من {old_numbers} إلى {new_numbers}."
         if token_set & THRESHOLD_WORDS:
-            return ChangeType.numeric_threshold, True, f"تغيرت قيمة رقمية أو حد من {old_numbers} إلى {new_numbers}."
+            return ChangeType.numeric_threshold, True, f"تغير حد رقمي ملزم من {old_numbers} إلى {new_numbers}."
     if token_set & SCOPE_WORDS:
-        return ChangeType.scope, True, "تغير نطاق المادة أو شرط انطباقها."
-    return ChangeType.modified, True, "تغير نص المادة تغييرًا جوهريًا يحتاج تحليل أثر."
+        return ChangeType.scope, True, "تغير نطاق انطباق المادة أو استثناءاتها."
+    if token_set & RESPONSIBILITY_WORDS:
+        return ChangeType.responsibility_changed, True, "تغيرت الجهة أو الدور المسؤول عن الامتثال."
+    if token_set & EVIDENCE_WORDS:
+        return ChangeType.evidence_requirement_changed, True, "تغيرت متطلبات الإثبات والتوثيق والسجلات."
+    return ChangeType.modified, True, "تغير نص المادة جوهرياً مما يتطلب مراجعة الأثر الداخلي."
 
 
 def compare_clause_sets(
@@ -56,17 +72,33 @@ def compare_clause_sets(
     new_clauses: list[Clause],
     db_path: Path | str | None = None,
 ) -> list[RegulatoryChange]:
-    old_by_ref = {clause.article_ref.casefold(): clause for clause in old_clauses}
-    new_by_ref = {clause.article_ref.casefold(): clause for clause in new_clauses}
+    # مطابقة ذكية تدعم الترقيم العربي والإنجليزي والأرقام الهندية
+    matched_pairs: list[tuple[Clause | None, Clause | None, str]] = []
+    unmatched_new = list(new_clauses)
+
+    for old_c in old_clauses:
+        # البحث عن المادة المقابلة في النسخة الجديدة
+        found_idx = None
+        for idx, new_c in enumerate(unmatched_new):
+            if are_articles_equivalent(old_c.article_ref, new_c.article_ref):
+                found_idx = idx
+                break
+        if found_idx is not None:
+            new_c = unmatched_new.pop(found_idx)
+            matched_pairs.append((old_c, new_c, new_c.article_ref))
+        else:
+            matched_pairs.append((old_c, None, old_c.article_ref))
+
+    for new_c in unmatched_new:
+        matched_pairs.append((None, new_c, new_c.article_ref))
+
     changes: list[RegulatoryChange] = []
-    for key in sorted(set(old_by_ref) | set(new_by_ref)):
-        before_clause, after_clause = old_by_ref.get(key), new_by_ref.get(key)
+    for before_clause, after_clause, article_ref in matched_pairs:
         before = before_clause.text if before_clause else None
         after = after_clause.text if after_clause else None
         if before == after:
             continue
         change_type, substantive, summary = _classify(before, after)
-        article_ref = (after_clause or before_clause).article_ref
         change = RegulatoryChange(
             change_id=db.stable_id("chg", old_version_id, new_version_id, article_ref),
             source_id=source_id,

@@ -7,7 +7,7 @@ from pathlib import Path
 from src import db
 from src.change_detection import compare_versions
 from src.demo import seed_demo
-from src.ingestion import register_document_version
+from src.ingestion import extract_clauses, register_document_version
 from src.schemas import ChangeType, DocumentVersionCreate
 
 
@@ -36,6 +36,16 @@ class ChangeDetectionTests(unittest.TestCase):
 
     def test_identical_versions_have_no_changes(self) -> None:
         self.assertEqual([], compare_versions(self.seeded["old_version_id"], self.seeded["old_version_id"], self.db_path))
+
+    def test_article_reference_excludes_heading_but_preserves_full_text(self) -> None:
+        clauses = extract_clauses(
+            "version_parser_regression",
+            "Article 5.1 Emissions: The operator must retain records.\n"
+            "المادة الخامسة النطاق: تسري هذه الضوابط على المنشأة.",
+        )
+        self.assertEqual(["Article 5.1", "المادة الخامسة"], [item.article_ref for item in clauses])
+        self.assertTrue(clauses[0].text.startswith("Article 5.1 Emissions:"))
+        self.assertTrue(clauses[1].text.startswith("المادة الخامسة النطاق:"))
 
     def test_prompt_injection_is_flagged_but_not_executed(self) -> None:
         payload = DocumentVersionCreate(

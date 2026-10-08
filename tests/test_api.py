@@ -14,7 +14,9 @@ class ApiIntegrationTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.temp = tempfile.TemporaryDirectory()
         cls.original_db_path = settings.database_path
+        cls.original_demo_mode = settings.demo_mode
         object.__setattr__(settings, "database_path", Path(cls.temp.name) / "api.db")
+        object.__setattr__(settings, "demo_mode", True)
         from app import app
         cls.client_context = TestClient(app)
         cls.client = cls.client_context.__enter__()
@@ -26,6 +28,7 @@ class ApiIntegrationTests(unittest.TestCase):
     def tearDownClass(cls) -> None:
         cls.client_context.__exit__(None, None, None)
         object.__setattr__(settings, "database_path", cls.original_db_path)
+        object.__setattr__(settings, "demo_mode", cls.original_demo_mode)
         cls.temp.cleanup()
 
     def _start_run(self, key: str) -> str:
@@ -41,13 +44,28 @@ class ApiIntegrationTests(unittest.TestCase):
 
     def test_health_ready_and_async_run_contract(self) -> None:
         self.assertEqual(200, self.client.get("/health").status_code)
-        self.assertEqual("ready", self.client.get("/ready").json()["status"])
+        ready = self.client.get("/ready").json()
+        self.assertEqual("ready", ready["status"])
+        self.assertEqual("in_process", ready["worker"])
         run_id = self._start_run("api-contract-0001")
         status_response = self.client.get(f"/runs/{run_id}", headers=self.analyst)
         self.assertEqual(200, status_response.status_code)
         self.assertIn(status_response.json()["run"]["phase"], {"queued", "awaiting_review", "completed"})
         findings = self.client.get(f"/runs/{run_id}/findings", headers=self.analyst).json()
         self.assertEqual(1, len(findings["tasks"]))
+
+    def test_capabilities_are_truthful_and_identity_is_required(self) -> None:
+        missing_identity = self.client.get("/system/capabilities", headers={"X-Role": "analyst"})
+        self.assertEqual(401, missing_identity.status_code)
+        response = self.client.get("/system/capabilities", headers=self.analyst)
+        self.assertEqual(200, response.status_code, response.text)
+        payload = response.json()
+        self.assertEqual("mvp", payload["product"]["stage"])
+        self.assertEqual(["NCA", "SASO"], payload["product"]["live_regulatory_sources"])
+        self.assertFalse(payload["ai"]["external_execution_allowed"])
+        self.assertTrue(payload["ai"]["human_review_required"])
+        self.assertFalse(payload["security"]["authentication"]["production_ready"])
+        self.assertNotIn("api_keys", response.text.casefold())
 
     def test_unauthorized_and_stale_review_status_codes(self) -> None:
         run_id = self._start_run("api-review-0001")

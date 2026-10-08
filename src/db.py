@@ -140,15 +140,20 @@ def insert_document_version(version: DocumentVersion, db_path: Path | str | None
             """INSERT INTO document_versions
                (version_id, source_id, sha256, text_sha256, content, published_at, effective_at,
                 retrieved_at, supersedes_version_id, is_simulated, simulation_notice, document_id,
-                storage_uri, mime_type, original_filename, source_last_modified_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                storage_uri, mime_type, original_filename, source_last_modified_at,
+                legal_status, enforcement_date, repealed_date, grace_period_days)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (version.version_id, version.source_id, version.sha256, version.text_sha256, version.content,
              version.published_at.isoformat() if version.published_at else None,
              version.effective_at.isoformat() if version.effective_at else None,
              version.retrieved_at.isoformat(), version.supersedes_version_id, int(version.is_simulated),
              version.simulation_notice, version.document_id, version.storage_uri, version.mime_type,
              version.original_filename,
-             version.source_last_modified_at.isoformat() if version.source_last_modified_at else None),
+             version.source_last_modified_at.isoformat() if version.source_last_modified_at else None,
+             version.legal_status,
+             version.enforcement_date.isoformat() if version.enforcement_date else None,
+             version.repealed_date.isoformat() if version.repealed_date else None,
+             version.grace_period_days),
         )
     return version
 
@@ -201,8 +206,9 @@ def upsert_regulatory_document(
                (document_id, source_id, authority, jurisdiction, regulatory_domain, title,
                 document_type, category, canonical_url, download_url, publication_date,
                 approval_date, mandatory_application_date, last_modified_at, metadata_json,
-                discovered_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                discovered_at, updated_at, publication_date_text, mandatory_application_date_text,
+                hijri_date, calendar_type)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(source_id, canonical_url) DO UPDATE SET
                  title=excluded.title, document_type=excluded.document_type,
                  category=excluded.category, download_url=excluded.download_url,
@@ -210,7 +216,11 @@ def upsert_regulatory_document(
                  approval_date=COALESCE(excluded.approval_date, regulatory_documents.approval_date),
                  mandatory_application_date=COALESCE(excluded.mandatory_application_date, regulatory_documents.mandatory_application_date),
                  last_modified_at=COALESCE(excluded.last_modified_at, regulatory_documents.last_modified_at),
-                 metadata_json=excluded.metadata_json, updated_at=excluded.updated_at""",
+                 metadata_json=excluded.metadata_json, updated_at=excluded.updated_at,
+                 publication_date_text=COALESCE(excluded.publication_date_text, regulatory_documents.publication_date_text),
+                 mandatory_application_date_text=COALESCE(excluded.mandatory_application_date_text, regulatory_documents.mandatory_application_date_text),
+                 hijri_date=COALESCE(excluded.hijri_date, regulatory_documents.hijri_date),
+                 calendar_type=COALESCE(excluded.calendar_type, regulatory_documents.calendar_type)""",
             (item.document_id, item.source_id, item.authority, item.jurisdiction,
              item.regulatory_domain, item.title, item.document_type, item.category,
              item.canonical_url, item.download_url,
@@ -218,7 +228,9 @@ def upsert_regulatory_document(
              item.approval_date.isoformat() if item.approval_date else None,
              item.mandatory_application_date.isoformat() if item.mandatory_application_date else None,
              item.last_modified_at.isoformat() if item.last_modified_at else None,
-             _json(item.metadata), item.discovered_at.isoformat(), item.updated_at.isoformat()),
+             _json(item.metadata), item.discovered_at.isoformat(), item.updated_at.isoformat(),
+             item.publication_date_text, item.mandatory_application_date_text,
+             item.hijri_date, item.calendar_type),
         )
         row = connection.execute(
             "SELECT * FROM regulatory_documents WHERE source_id=? AND canonical_url=?",
@@ -261,12 +273,15 @@ def insert_clause(clause: Clause, db_path: Path | str | None = None) -> Clause:
     with connect(db_path) as connection:
         connection.execute(
             """INSERT OR IGNORE INTO clauses
-               (clause_id, version_id, article_ref, heading, text, page_number, start_offset, end_offset, text_sha256)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (clause_id, version_id, article_ref, heading, text, page_number, start_offset, end_offset, text_sha256,
+                raw_text, normalized_text, language)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (clause.clause_id, clause.version_id, clause.article_ref, clause.heading, clause.text,
-             clause.page_number, clause.start_offset, clause.end_offset, clause.text_sha256),
+             clause.page_number, clause.start_offset, clause.end_offset, clause.text_sha256,
+             clause.raw_text or clause.text, clause.normalized_text or clause.text, clause.language or "ar"),
         )
     return clause
+
 
 
 def list_clauses(version_id: str, db_path: Path | str | None = None) -> list[Clause]:
@@ -866,9 +881,12 @@ def insert_company_document_chunk(item: CompanyDocumentChunk, db_path=None) -> C
         connection.execute(
             """INSERT OR IGNORE INTO company_document_chunks
                (chunk_id, company_document_id, sequence_no, locator_type, locator_json,
-                section_ref, text, text_sha256) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                section_ref, text, text_sha256, raw_text, normalized_text, language, extraction_quality)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (item.chunk_id, item.company_document_id, item.sequence_no, item.locator.locator_type,
-             _json(item.locator), item.section_ref, item.text, item.text_sha256),
+             _json(item.locator), item.section_ref, item.text, item.text_sha256,
+             item.raw_text or item.text, item.normalized_text or item.text, item.language or "ar",
+             item.extraction_quality or "extraction_success"),
         )
         row = connection.execute("SELECT * FROM company_document_chunks WHERE chunk_id=?",
                                  (item.chunk_id,)).fetchone()
@@ -913,15 +931,18 @@ def insert_dependency(item: dict[str, Any], db_path=None) -> dict[str, Any]:
             """INSERT OR IGNORE INTO document_dependencies
                (dependency_id, company_id, company_document_id, chunk_id, source_id, version_id,
                 clause_id, obligation_id, obligation_key, article_ref, department, project_id,
-                relationship_type, active, established_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
+                relationship_type, active, established_at, matching_method, confidence, rationale)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)""",
             (dependency_id, item["company_id"], item["company_document_id"], item["chunk_id"],
              item["source_id"], item["version_id"], item["clause_id"], item.get("obligation_id"),
              item["obligation_key"], item["article_ref"], item["department"], item.get("project_id"),
-             item.get("relationship_type", "depends_on"), _now()),
+             item.get("relationship_type", "depends_on"), _now(),
+             item.get("matching_method", "exact_reference"), float(item.get("confidence", 1.0)),
+             item.get("rationale", "")),
         )
         row = connection.execute("SELECT * FROM document_dependencies WHERE dependency_id=?", (dependency_id,)).fetchone()
     return dict(row)
+
 
 
 def list_dependencies(*, company_document_id: str | None = None, article_ref: str | None = None, db_path=None) -> list[dict[str, Any]]:

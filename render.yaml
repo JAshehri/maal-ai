@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: maal-ai
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.8
+      - key: DEMO_MODE
+        value: "false"
+      - key: MAAL_LLM_PROVIDER
+        value: deterministic
+      - key: MAAL_AUTH_MODE
+        value: token
+      - key: MAAL_API_KEYS_JSON
+        sync: false
+      - key: MAAL_DATABASE_PATH
+        value: /tmp/maal/maal.db
+      - key: MAAL_REGULATORY_STORAGE_DIR
+        value: /tmp/maal/regulatory/raw
+      - key: MAAL_ALLOWED_ORIGINS
+        value: https://maal-ai.onrender.com

@@ -139,8 +139,7 @@ def _parse_csv(raw: bytes) -> list[dict]:
     return result
 
 
-PARSERS = {".pdf": _parse_pdf, ".docx": _parse_docx, ".xlsx": _parse_xlsx,
-           ".pptx": _parse_pptx, ".txt": _parse_text, ".csv": _parse_csv}
+from .document_processing import extract_document_content, PARSERS
 
 
 def ingest_company_document(*, raw: bytes, filename: str, mime_type: str,
@@ -162,8 +161,10 @@ def ingest_company_document(*, raw: bytes, filename: str, mime_type: str,
         raise ValueError("unsafe company document storage path")
     storage.parent.mkdir(parents=True, exist_ok=True)
     if not storage.exists(): storage.write_bytes(raw)
-    parsed = PARSERS[suffix](raw)
-    if not parsed:
+    extraction = extract_document_content(raw, filename)
+    if not extraction.chunks:
+        if extraction.overall_quality == "OCR_required":
+            raise ValueError(f"document requires OCR and contains no extractable text: {filename}")
         raise ValueError("document contains no extractable text")
     document = CompanyDocument(
         company_document_id=document_id, company_snapshot_id=company_snapshot_id,
@@ -171,17 +172,28 @@ def ingest_company_document(*, raw: bytes, filename: str, mime_type: str,
         filename=Path(filename).name, mime_type=mime_type, document_kind=document_kind,
         department=department, project_id=project_id, sha256=digest,
         storage_uri=str(storage.relative_to(settings.root_dir)).replace("\\", "/"),
-        metadata={"format": suffix[1:], "chunk_count": len(parsed)},
+        metadata={
+            "format": suffix[1:],
+            "chunk_count": len(extraction.chunks),
+            "extraction_quality": extraction.overall_quality,
+            "quality_summary": extraction.quality_summary,
+            "total_words": extraction.total_words,
+            "page_count": extraction.page_count,
+        },
     )
     stored = db.insert_company_document(document, db_path)
     chunks = []
-    for index, item in enumerate(parsed, 1):
+    for index, item in enumerate(extraction.chunks, 1):
         chunk = CompanyDocumentChunk(
-            chunk_id=db.stable_id("chunk", document_id, str(index), item["text"]),
+            chunk_id=db.stable_id("chunk", document_id, str(index), item.raw_text),
             company_document_id=document_id, sequence_no=index,
-            locator=DocumentLocator.model_validate(item["locator"]),
-            section_ref=item.get("section_ref"), text=item["text"],
-            text_sha256=hashlib.sha256(item["text"].encode("utf-8")).hexdigest(),
+            locator=DocumentLocator.model_validate(item.locator),
+            section_ref=item.section_ref, text=item.raw_text,
+            text_sha256=hashlib.sha256(item.raw_text.encode("utf-8")).hexdigest(),
+            raw_text=item.raw_text,
+            normalized_text=item.normalized_text,
+            language=item.language,
+            extraction_quality=item.extraction_quality,
         )
         chunks.append(db.insert_company_document_chunk(chunk, db_path))
     warnings = sorted(set(w for item in chunks for w in detect_prompt_injection(item.text)))
