@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="icon" href="data:,"><title>مآل | منصة الامتثال التنظيمي</title>
-  <link rel="stylesheet" href="/static/styles.css?v=live-company-2">
+  <link rel="stylesheet" href="/static/styles.css?v=live-company-4">
 </head>
 <body>
   <section id="onboardingRoot" class="onboarding-shell" hidden>
@@ -16,6 +16,7 @@
       <section id="onboardingReview" class="onboarding-step" hidden>
         <span class="onboarding-kicker" data-i18n="review_profile_kicker">مراجعة قبل الاعتماد</span><h1 data-i18n="review_profile_title">راجع ملف الشركة والنطاق التنظيمي</h1><p data-i18n="review_profile_intro">صحح المعلومات أو أضف نطاقًا اختياريًا. المجالات الإلزامية لا تُحذف دون صلاحية مسؤول.</p>
         <div class="profile-review-grid"><article class="surface"><h2 data-i18n="company_profile">ملف الشركة</h2><div id="profileFields" class="profile-fields"></div></article><article class="surface"><div class="surface-head"><div><h2 data-i18n="regulatory_scope">النطاق التنظيمي</h2><p data-i18n="scope_explainer">Company-Inferred + Mandatory Baseline + User-Confirmed</p></div></div><div id="scopeReview" class="scope-list"></div><div class="scope-add"><select id="addScopeSelect"></select><button id="addScopeButton" class="secondary-action" data-i18n="add_domain">إضافة مجال</button></div></article></div>
+        <article class="surface onboarding-documents"><div class="surface-head"><div><h2 data-i18n="uploaded_company_files">ملفات الشركة المرفوعة</h2><p data-i18n="uploaded_company_files_hint">يمكن حذف أي ملف قبل اعتماد ملف الشركة.</p></div></div><div id="onboardingServerFiles" class="server-file-list"></div></article>
         <div class="onboarding-footer"><button id="backToUpload" class="secondary-action" data-i18n="upload_more">رفع ملفات أخرى</button><button id="approveProfile" class="primary-action" data-i18n="approve_profile">اعتماد ملف الشركة</button></div>
       </section>
       <div id="onboardingProgress" class="progress-note" hidden></div>
@@ -27,11 +28,12 @@
       <div class="brand"><span class="brand-mark">م</span><div><strong>مآل</strong><small>Maal Compliance</small></div></div>
       <nav class="main-nav" aria-label="Primary navigation">
         <button class="nav-item active" data-page="dashboard"><span class="nav-index">01</span><span data-i18n="nav_dashboard">لوحة المتابعة</span></button>
-        <button class="nav-item" data-page="analysis"><span class="nav-index">02</span><span data-i18n="nav_analysis">التحليل التنظيمي</span></button>
-        <button class="nav-item" data-page="review"><span class="nav-index">03</span><span data-i18n="nav_review">مراجعة الملفات</span></button>
-        <button class="nav-item" data-page="trace"><span class="nav-index">04</span><span data-i18n="nav_trace">تتبع الأثر</span></button>
-        <button class="nav-item" data-page="financial"><span class="nav-index">05</span><span data-i18n="nav_financial">التعرض المالي</span></button>
-        <button class="nav-item" data-page="human"><span class="nav-index">06</span><span data-i18n="nav_human">المراجعة البشرية</span></button>
+        <button class="nav-item" data-page="documents"><span class="nav-index">02</span><span data-i18n="nav_documents">ملفات الشركة</span></button>
+        <button class="nav-item" data-page="analysis"><span class="nav-index">03</span><span data-i18n="nav_analysis">التحليل التنظيمي</span></button>
+        <button class="nav-item" data-page="review"><span class="nav-index">04</span><span data-i18n="nav_review">مراجعة الملفات</span></button>
+        <button class="nav-item" data-page="trace"><span class="nav-index">05</span><span data-i18n="nav_trace">تتبع الأثر</span></button>
+        <button class="nav-item" data-page="financial"><span class="nav-index">06</span><span data-i18n="nav_financial">التعرض المالي</span></button>
+        <button class="nav-item" data-page="human"><span class="nav-index">07</span><span data-i18n="nav_human">المراجعة البشرية</span></button>
       </nav>
       <div class="sidebar-foot"><span class="system-dot"></span><span data-i18n="system_ready">النظام جاهز</span></div>
     </aside>
@@ -59,6 +61,16 @@
             <article class="surface wide"><div class="surface-head"><div><h3 data-i18n="recent_changes">أحدث التغييرات التنظيمية</h3><p data-i18n="recent_changes_hint">التغييرات الأحدث ذات الصلة بالمنشأة</p></div><button class="text-button" data-open-page="analysis" data-i18n="view_analysis">فتح التحليل</button></div><div class="table-scroll"><table><thead><tr><th data-i18n="regulation">اللائحة</th><th data-i18n="article">المادة</th><th data-i18n="change">التغيير</th><th data-i18n="applicability">الانطباق</th><th data-i18n="priority">الأولوية</th></tr></thead><tbody id="recentChangesBody"></tbody></table></div></article>
             <article class="surface watch-card"><div class="surface-head"><div><h3 data-i18n="recent_30">تحديثات آخر 30 يومًا</h3><p data-i18n="watch_hint">متطلبات يجب مراقبتها عند رفع ملفات جديدة</p></div><span class="status-badge warning" id="watchCount">—</span></div><div id="watchList" class="watch-list"></div></article>
           </div>
+        </section>
+
+        <section class="page" id="page-documents">
+          <div class="page-intro"><div><h2 data-i18n="company_files_title">ملفات الشركة</h2><p data-i18n="company_files_subtitle">أضف ملفات جديدة أو احذف ملفًا من النسخة الحالية ثم راجع ملف الشركة المحدث.</p></div></div>
+          <article class="surface upload-surface">
+            <label id="companyFilesDrop" class="drop-zone" for="companyFilesInput"><input id="companyFilesInput" type="file" multiple accept=".pdf,.docx,.xlsx,.pptx,.txt,.csv"><strong data-i18n="onboarding_drop">اسحب ملفات الشركة هنا أو اختر عدة ملفات</strong><span data-i18n="onboarding_examples">السياسات، الإجراءات، العقود، المواصفات، ملفات الموارد البشرية والمشاريع</span><small>PDF, DOCX, XLSX, PPTX, TXT, CSV</small></label>
+            <div id="companyFilesSelection" class="file-list"></div>
+            <button id="uploadCompanyFiles" class="primary-action" disabled data-i18n="upload_and_analyze">رفع الملفات وتحليلها</button>
+          </article>
+          <article class="surface"><div class="surface-head"><div><h3 data-i18n="uploaded_company_files">ملفات الشركة المرفوعة</h3><p data-i18n="delete_rebuild_hint">الحذف يعيد بناء النسخة الحالية دون بيانات الملف المحذوف.</p></div></div><div id="companyFilesList" class="server-file-list"></div></article>
         </section>
 
         <section class="page" id="page-analysis">
@@ -105,6 +117,6 @@
 
   <dialog id="textDialog"><div class="dialog-head"><h3 id="dialogTitle"></h3><button id="closeDialog" aria-label="Close">×</button></div><pre id="dialogText" dir="auto"></pre></dialog>
   <div id="toast" role="status"></div>
-  <script src="/static/app.js?v=live-company-2"></script>
+  <script src="/static/app.js?v=live-company-4"></script>
 </body>
 </html>

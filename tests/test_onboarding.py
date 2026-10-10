@@ -11,6 +11,7 @@ from src.onboarding import (
     create_profile_from_documents,
     get_onboarding,
     live_ui_overview,
+    remove_profile_document,
     seed_regulatory_domains,
 )
 from src.regulatory.registry import seed_regulatory_sources
@@ -132,6 +133,72 @@ def test_later_upload_creates_immutable_version_and_retains_prior_evidence(clean
     assert all(json.loads(row["payload_json"])["document_count"] >= 2 for row in versions)
 
 
+def test_empty_upload_is_rejected_without_poisoning_profile_and_can_be_retried(clean_database):
+    with pytest.raises(ValueError, match="empty company document was removed"):
+        create_profile_from_documents(
+            company_name="Retry Electronics Co",
+            files=[("empty.txt", "text/plain", b"")],
+            db_path=clean_database,
+        )
+
+    state = get_onboarding(db_path=clean_database)
+    assert state["status"] == "not_started"
+    assert state["company"] is None
+
+    retried = create_profile_from_documents(
+        company_name="Retry Electronics Co",
+        files=[("company.txt", "text/plain", COMPANY_OVERVIEW)],
+        db_path=clean_database,
+    )
+    assert retried["status"] == "in_progress"
+    assert [item["filename"] for item in retried["documents"]] == ["company.txt"]
+
+
+def test_removing_document_rebuilds_current_profile_without_stale_facts(clean_database):
+    state = create_profile_from_documents(company_name="Real Electronics Co", files=_files(), db_path=clean_database)
+    company_id = state["company"]["company_id"]
+    supply_document = next(item for item in state["documents"] if item["filename"] == "supply-chain.txt")
+
+    rebuilt = remove_profile_document(company_id, supply_document["onboarding_document_id"], clean_database)
+    assert [item["filename"] for item in rebuilt["documents"]] == ["company-overview.txt"]
+    assert rebuilt["fact_summary"].get("has_suppliers") is not True
+    assert rebuilt["profile_version"]["version_no"] == 2
+
+    reuploaded = create_profile_from_documents(
+        company_name="Real Electronics Co",
+        files=[("supply-chain.txt", "text/plain", SUPPLY_CHAIN)],
+        db_path=clean_database,
+    )
+    assert {item["filename"] for item in reuploaded["documents"]} == {
+        "company-overview.txt",
+        "supply-chain.txt",
+    }
+    assert reuploaded["fact_summary"]["has_suppliers"] is True
+
+
+def test_removing_last_document_returns_to_upload_and_allows_clean_reupload(clean_database):
+    initial = create_profile_from_documents(
+        company_name="Single File Co",
+        files=[("company.txt", "text/plain", COMPANY_OVERVIEW)],
+        db_path=clean_database,
+    )
+    company_id = initial["company"]["company_id"]
+    document_id = initial["documents"][0]["onboarding_document_id"]
+
+    empty = remove_profile_document(company_id, document_id, clean_database)
+    assert empty["current_step"] == "upload"
+    assert empty["documents"] == []
+    assert empty["facts"] == []
+
+    reuploaded = create_profile_from_documents(
+        company_name="Single File Co",
+        files=[("company.txt", "text/plain", COMPANY_OVERVIEW)],
+        db_path=clean_database,
+    )
+    assert len(reuploaded["documents"]) == 1
+    assert reuploaded["profile_version"]["version_no"] == 3
+
+
 def test_normal_mode_api_uses_onboarding_and_never_exposes_demo(tmp_path):
     from app import app
 
@@ -174,6 +241,47 @@ def test_normal_mode_api_uses_onboarding_and_never_exposes_demo(tmp_path):
             assert payload["scan"] is None
             assert payload["regulations"] == []
             assert payload["summary"]["estimated_financial_exposure"] is None
+    finally:
+        object.__setattr__(settings, "database_path", original_path)
+        object.__setattr__(settings, "demo_mode", original_demo)
+
+
+def test_company_document_delete_api_and_reupload(tmp_path):
+    from app import app
+
+    original_path, original_demo = settings.database_path, settings.demo_mode
+    object.__setattr__(settings, "database_path", tmp_path / "document-delete.db")
+    object.__setattr__(settings, "demo_mode", False)
+    headers = {"X-Role": "analyst", "X-User-Id": "analyst-test"}
+    try:
+        with TestClient(app) as client:
+            uploaded = client.post(
+                "/onboarding/documents",
+                headers=headers,
+                data={"company_name": "Delete API Co"},
+                files=[("files", ("company.txt", COMPANY_OVERVIEW, "text/plain"))],
+            )
+            assert uploaded.status_code == 201
+            state = uploaded.json()
+            company_id = state["company"]["company_id"]
+            document_id = state["documents"][0]["onboarding_document_id"]
+
+            deleted = client.delete(
+                f"/onboarding/{company_id}/documents/{document_id}",
+                headers=headers,
+            )
+            assert deleted.status_code == 200
+            assert deleted.json()["documents"] == []
+            assert deleted.json()["current_step"] == "upload"
+
+            retried = client.post(
+                "/onboarding/documents",
+                headers=headers,
+                data={"company_name": "Delete API Co"},
+                files=[("files", ("company.txt", COMPANY_OVERVIEW, "text/plain"))],
+            )
+            assert retried.status_code == 201
+            assert [item["filename"] for item in retried.json()["documents"]] == ["company.txt"]
     finally:
         object.__setattr__(settings, "database_path", original_path)
         object.__setattr__(settings, "demo_mode", original_demo)

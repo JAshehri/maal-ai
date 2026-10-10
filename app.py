@@ -14,7 +14,14 @@ from src.ai_policy import ai_operating_posture, product_capabilities
 from src.auth import AuthenticationFailure, authenticate, authentication_posture
 from src.company_documents import ingest_company_document
 from src.compliance_review import create_compliance_review, impact_graph, seed_core_demo, ui_overview
-from src.onboarding import approve_profile, create_profile_from_documents, get_onboarding, live_ui_overview, seed_regulatory_domains
+from src.onboarding import (
+    approve_profile,
+    create_profile_from_documents,
+    get_onboarding,
+    live_ui_overview,
+    remove_profile_document,
+    seed_regulatory_domains,
+)
 from src.generate_report import generate_report
 from src.ingestion import register_document_version
 from src.pipeline import create_run, execute_run
@@ -50,7 +57,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.allowed_origins),
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Content-Type", "X-Role", "X-User-Id", "X-API-Token"],
 )
 
@@ -191,6 +198,20 @@ def approve_company_profile(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.delete("/onboarding/{company_id}/documents/{document_id}")
+def delete_onboarding_document(
+    company_id: str,
+    document_id: str,
+    _: tuple[str, str] = Depends(require_roles("analyst", "admin")),
+) -> dict:
+    try:
+        return remove_profile_document(company_id, document_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="company document not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @app.get("/ui/live-overview")

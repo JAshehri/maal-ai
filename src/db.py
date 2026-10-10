@@ -769,9 +769,9 @@ def dashboard_summary(db_path: Path | str | None = None) -> dict[str, Any]:
         counts = connection.execute(
             """SELECT
                  COUNT(*) AS total,
-                 SUM(CASE WHEN applicability_status IN ('applicable','potentially_applicable') THEN 1 ELSE 0 END) AS relevant,
-                 SUM(CASE WHEN applicability_status='not_applicable' THEN 1 ELSE 0 END) AS filtered,
-                 SUM(CASE WHEN priority='high' THEN 1 ELSE 0 END) AS high_priority
+                 COALESCE(SUM(CASE WHEN applicability_status IN ('applicable','potentially_applicable') THEN 1 ELSE 0 END), 0) AS relevant,
+                 COALESCE(SUM(CASE WHEN applicability_status='not_applicable' THEN 1 ELSE 0 END), 0) AS filtered,
+                 COALESCE(SUM(CASE WHEN priority='high' THEN 1 ELSE 0 END), 0) AS high_priority
                FROM scan_document_results"""
         ).fetchone()
     return {"latest_scan": dict(latest) if latest else None, "documents": dict(counts)}

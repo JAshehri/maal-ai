@@ -191,58 +191,94 @@ def _build_scope(profile_version_id: str, facts: dict[str, Any], fact_details: l
                     )
 
 
-def create_profile_from_documents(*, company_name: str, files: list[tuple[str, str, bytes]], db_path=None) -> dict[str, Any]:
+def create_profile_from_documents(
+    *,
+    company_name: str,
+    files: list[tuple[str, str, bytes]],
+    db_path=None,
+    retain_existing: bool = True,
+) -> dict[str, Any]:
     if not files:
         raise ValueError("at least one company document is required")
     company_id = db.stable_id("company", company_name.casefold())
     now = _now()
+
+    # Validate and extract every document before changing the active profile.
+    # A bad/empty file must never leave a half-created company whose
+    # current_version_id points to nothing.
+    candidate_files = list(files)
     with db.connect(db_path) as connection:
         profile = connection.execute("SELECT * FROM company_profiles WHERE company_id=?", (company_id,)).fetchone()
-        if profile:
+        if profile and retain_existing:
             previous_documents = connection.execute(
                 "SELECT filename, mime_type, storage_uri, sha256 FROM onboarding_documents WHERE profile_version_id=?",
                 (profile["current_version_id"],),
             ).fetchall()
-            supplied_hashes = {hashlib.sha256(raw).hexdigest() for _, _, raw in files}
+            supplied_hashes = {hashlib.sha256(raw).hexdigest() for _, _, raw in candidate_files}
             for prior in previous_documents:
                 prior_path = (settings.root_dir / prior["storage_uri"]).resolve()
                 if prior["sha256"] not in supplied_hashes and prior_path.exists():
-                    files.append((prior["filename"], prior["mime_type"], prior_path.read_bytes()))
-            version_no = connection.execute("SELECT COALESCE(MAX(version_no),0)+1 FROM company_profile_versions WHERE company_id=?", (company_id,)).fetchone()[0]
-        else:
+                    candidate_files.append((prior["filename"], prior["mime_type"], prior_path.read_bytes()))
+
+    prepared: list[dict[str, Any]] = []
+    seen_hashes: set[str] = set()
+    for filename, mime_type, raw in candidate_files:
+        suffix = Path(filename).suffix.lower()
+        if suffix not in SUPPORTED_EXTENSIONS:
+            raise ValueError(f"unsupported company document format: {suffix or 'none'}")
+        if not raw:
+            raise ValueError(f"empty company document was removed: {filename}")
+        digest = hashlib.sha256(raw).hexdigest()
+        if digest in seen_hashes:
+            continue
+        extraction = extract_document_content(raw, filename)
+        if not extraction.chunks:
+            if extraction.overall_quality == "OCR_required":
+                raise ValueError(f"document requires OCR and contains no extractable text: {filename}")
+            raise ValueError(f"document contains no extractable text: {filename}")
+        seen_hashes.add(digest)
+        prepared.append({
+            "filename": filename,
+            "mime_type": mime_type,
+            "raw": raw,
+            "suffix": suffix,
+            "digest": digest,
+            "extraction": extraction,
+        })
+    if not prepared:
+        raise ValueError("at least one non-empty company document is required")
+
+    with db.connect(db_path) as connection:
+        profile = connection.execute("SELECT * FROM company_profiles WHERE company_id=?", (company_id,)).fetchone()
+        if not profile:
             connection.execute("INSERT INTO company_profiles VALUES (?, ?, NULL, 'onboarding', ?, ?)", (company_id, company_name, now, now))
-            version_no = 1
+        version_no = connection.execute(
+            "SELECT COALESCE(MAX(version_no),0)+1 FROM company_profile_versions WHERE company_id=?",
+            (company_id,),
+        ).fetchone()[0]
         profile_version_id = db.stable_id("profilev", company_id, str(version_no), now)
         connection.execute(
             """INSERT INTO company_profile_versions
                (profile_version_id, company_id, version_no, status, payload_json, created_at)
                VALUES (?, ?, ?, 'draft', '{}', ?)""", (profile_version_id, company_id, version_no, now)
         )
-        connection.execute(
-            """INSERT INTO onboarding_status(company_id, status, current_step, updated_at)
-               VALUES (?, 'in_progress', 'review_scope', ?)
-               ON CONFLICT(company_id) DO UPDATE SET status='in_progress', current_step='review_scope', last_error=NULL, updated_at=excluded.updated_at""",
-            (company_id, now),
-        )
     # Keep paths comfortably below the legacy Windows path limit while IDs in the
     # database retain their full collision-resistant value.
     storage_root = (settings.root_dir / "data" / "company" / "onboarding" / company_id[-12:] / profile_version_id[-12:]).resolve()
-    for filename, mime_type, raw in files:
-        suffix = Path(filename).suffix.lower()
-        if suffix not in SUPPORTED_EXTENSIONS:
-            raise ValueError(f"unsupported company document format: {suffix or 'none'}")
-        digest = hashlib.sha256(raw).hexdigest(); document_id = db.stable_id("ondoc", profile_version_id, digest)
+    for prepared_file in prepared:
+        filename = prepared_file["filename"]
+        mime_type = prepared_file["mime_type"]
+        raw = prepared_file["raw"]
+        suffix = prepared_file["suffix"]
+        digest = prepared_file["digest"]
+        extraction = prepared_file["extraction"]
+        document_id = db.stable_id("ondoc", profile_version_id, digest)
         safe = re.sub(r"[^A-Za-z0-9._-]+", "-", Path(filename).name).strip("-") or f"document{suffix}"
         path = (storage_root / document_id[-12:] / safe).resolve()
         if storage_root not in path.parents:
             raise ValueError("unsafe onboarding storage path")
         path.parent.mkdir(parents=True, exist_ok=True)
         if not path.exists(): path.write_bytes(raw)
-        extraction = extract_document_content(raw, filename)
-        if not extraction.chunks:
-            if extraction.overall_quality == "OCR_required":
-                raise ValueError(f"document requires OCR and contains no extractable text: {filename}")
-            raise ValueError(f"document contains no extractable text: {filename}")
         with db.connect(db_path) as connection:
             connection.execute(
                 """INSERT INTO onboarding_documents
@@ -267,10 +303,16 @@ def create_profile_from_documents(*, company_name: str, files: list[tuple[str, s
                              confidence=confidence, method=method, db_path=db_path)
     facts, details = _merged_facts(profile_version_id, db_path)
     _build_scope(profile_version_id, facts, details, db_path)
-    payload = {"facts": facts, "document_count": len(files)}
+    payload = {"facts": facts, "document_count": len(prepared)}
     with db.connect(db_path) as connection:
         connection.execute("UPDATE company_profile_versions SET payload_json=? WHERE profile_version_id=?", (_json(payload), profile_version_id))
         connection.execute("UPDATE company_profiles SET current_version_id=?, updated_at=? WHERE company_id=?", (profile_version_id, _now(), company_id))
+        connection.execute(
+            """INSERT INTO onboarding_status(company_id, status, current_step, updated_at)
+               VALUES (?, 'in_progress', 'review_scope', ?)
+               ON CONFLICT(company_id) DO UPDATE SET status='in_progress', current_step='review_scope', last_error=NULL, updated_at=excluded.updated_at""",
+            (company_id, _now()),
+        )
     return get_onboarding(company_id, db_path)
 
 
@@ -282,7 +324,31 @@ def get_onboarding(company_id: str | None = None, db_path=None) -> dict[str, Any
             profile = connection.execute("SELECT * FROM company_profiles ORDER BY updated_at DESC LIMIT 1").fetchone()
         if not profile:
             return {"status": "not_started", "company": None, "profile_version": None, "facts": [], "scope": [], "documents": []}
+        if not profile["current_version_id"]:
+            return {
+                "status": "not_started",
+                "current_step": "upload",
+                "company": {"company_id": profile["company_id"], "name": profile["name"], "status": profile["status"]},
+                "profile_version": None,
+                "fact_summary": {},
+                "facts": [],
+                "scope": [],
+                "documents": [],
+                "notice": "Previous upload did not create a usable profile. Upload non-empty documents to continue.",
+            }
         version = connection.execute("SELECT * FROM company_profile_versions WHERE profile_version_id=?", (profile["current_version_id"],)).fetchone()
+        if not version:
+            return {
+                "status": "not_started",
+                "current_step": "upload",
+                "company": {"company_id": profile["company_id"], "name": profile["name"], "status": profile["status"]},
+                "profile_version": None,
+                "fact_summary": {},
+                "facts": [],
+                "scope": [],
+                "documents": [],
+                "notice": "The active company profile is unavailable. Upload company documents to rebuild it.",
+            }
         status = connection.execute("SELECT * FROM onboarding_status WHERE company_id=?", (profile["company_id"],)).fetchone()
         docs = connection.execute("SELECT onboarding_document_id, filename, mime_type, created_at FROM onboarding_documents WHERE profile_version_id=? ORDER BY created_at", (version["profile_version_id"],)).fetchall()
         scope_rows = connection.execute(
@@ -298,6 +364,72 @@ def get_onboarding(company_id: str | None = None, db_path=None) -> dict[str, Any
                                 "status": version["status"], "company_snapshot_id": version["company_snapshot_id"]},
             "fact_summary": facts, "facts": details, "scope": [dict(row) for row in scope_rows],
             "documents": [dict(row) for row in docs]}
+
+
+def remove_profile_document(company_id: str, document_id: str, db_path=None) -> dict[str, Any]:
+    """Remove a document from the active profile by creating a clean draft version.
+
+    Approved historical versions remain immutable for audit purposes, while the
+    newly active draft is rebuilt only from the documents the user kept. This
+    prevents facts from a deleted document leaking into a later re-upload.
+    """
+    current = get_onboarding(company_id, db_path)
+    if not current.get("company") or not current.get("profile_version"):
+        raise KeyError(document_id)
+    active_version_id = current["profile_version"]["profile_version_id"]
+    with db.connect(db_path) as connection:
+        target = connection.execute(
+            """SELECT * FROM onboarding_documents
+               WHERE onboarding_document_id=? AND company_id=? AND profile_version_id=?""",
+            (document_id, company_id, active_version_id),
+        ).fetchone()
+        if not target:
+            raise KeyError(document_id)
+        remaining = connection.execute(
+            """SELECT filename, mime_type, storage_uri FROM onboarding_documents
+               WHERE profile_version_id=? AND onboarding_document_id!=? ORDER BY created_at""",
+            (active_version_id, document_id),
+        ).fetchall()
+
+    files: list[tuple[str, str, bytes]] = []
+    for item in remaining:
+        path = (settings.root_dir / item["storage_uri"]).resolve()
+        if not path.exists():
+            raise ValueError(f"stored company document is unavailable: {item['filename']}")
+        files.append((item["filename"], item["mime_type"], path.read_bytes()))
+
+    if files:
+        return create_profile_from_documents(
+            company_name=current["company"]["name"],
+            files=files,
+            db_path=db_path,
+            retain_existing=False,
+        )
+
+    now = _now()
+    with db.connect(db_path) as connection:
+        version_no = connection.execute(
+            "SELECT COALESCE(MAX(version_no),0)+1 FROM company_profile_versions WHERE company_id=?",
+            (company_id,),
+        ).fetchone()[0]
+        version_id = db.stable_id("profilev", company_id, str(version_no), now)
+        connection.execute(
+            """INSERT INTO company_profile_versions
+               (profile_version_id, company_id, version_no, status, payload_json, created_at)
+               VALUES (?, ?, ?, 'draft', '{"facts":{},"document_count":0}', ?)""",
+            (version_id, company_id, version_no, now),
+        )
+        connection.execute(
+            "UPDATE company_profiles SET current_version_id=?, status='onboarding', updated_at=? WHERE company_id=?",
+            (version_id, now, company_id),
+        )
+        connection.execute(
+            """INSERT INTO onboarding_status(company_id, status, current_step, updated_at)
+               VALUES (?, 'in_progress', 'upload', ?)
+               ON CONFLICT(company_id) DO UPDATE SET status='in_progress', current_step='upload', last_error=NULL, updated_at=excluded.updated_at""",
+            (company_id, now),
+        )
+    return get_onboarding(company_id, db_path)
 
 
 def approve_profile(company_id: str, *, expected_version: int, profile_edits: dict[str, Any],
