@@ -84,7 +84,7 @@ def classify_discovered_document(
             )
         return DiscoveryApplicability(
             "applicable" if required or essential_scope_proven else "potentially_applicable",
-            "المنشأة سعودية ونشاطها التقني/الصناعي يتقاطع مع نطاق وثيقة NCA، مع بقاء الحكم التفصيلي للمواد.",
+            "تُظهر الأدلة المعتمدة في ملف المنشأة ارتباط أنظمتها أو عملياتها بالنطاق العام لهذه الوثيقة. ويُراجع توافق كل متطلب تفصيليًا وفق الأصول والأنظمة والأدلة المتاحة.",
             departments + (["Engineering"] if document.category == "Operational Technology Cybersecurity Controls" else []),
             "high" if document.category in {"Critical Systems Cybersecurity Controls", "Operational Technology Cybersecurity Controls"} else "medium",
         )

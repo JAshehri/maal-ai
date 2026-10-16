@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import tempfile
+import time
+import threading
 import unittest
 from pathlib import Path
 
@@ -41,6 +43,40 @@ class _FakeConnector(RegulatorySourceConnector):
             final_url=document.download_url or document.canonical_url,
             filename="test.txt", http_status=200,
         )
+
+
+class _ParallelFetchConnector(_FakeConnector):
+    def __init__(self, source_id: str, content: str) -> None:
+        super().__init__(source_id, content)
+        self._lock = threading.Lock()
+        self.active_fetches = 0
+        self.max_active_fetches = 0
+
+    def discover(self, source_id: str) -> list[RegulatoryDocument]:
+        return [RegulatoryDocument(
+            document_id=db.stable_id("regdoc", source_id, f"https://nca.gov.sa/test-{index}"),
+            source_id=source_id, authority="NCA", jurisdiction="SA",
+            regulatory_domain="Cybersecurity", title=f"Data Cybersecurity Controls {index}",
+            document_type="cybersecurity_controls", category="Data Cybersecurity Controls",
+            canonical_url=f"https://nca.gov.sa/test-{index}",
+            download_url=f"https://nca.gov.sa/test-{index}.txt",
+        ) for index in range(4)]
+
+    def fetch_document(self, document: RegulatoryDocument) -> FetchedDocument:
+        with self._lock:
+            self.active_fetches += 1
+            self.max_active_fetches = max(self.max_active_fetches, self.active_fetches)
+        try:
+            time.sleep(0.15)
+            return FetchedDocument(
+                document=document,
+                content=f"Article {document.document_id[-4:]} The organization must protect data.".encode(),
+                content_type="text/plain", final_url=document.download_url or document.canonical_url,
+                filename="test.txt", http_status=200,
+            )
+        finally:
+            with self._lock:
+                self.active_fetches -= 1
 
 
 class _IrrelevantSASOConnector(RegulatorySourceConnector):
@@ -220,6 +256,24 @@ class ConnectorTests(unittest.TestCase):
         versions = db.list_document_versions(source_id, self.db_path)
         self.assertEqual(len(versions), 2)
         self.assertEqual(versions[0]["supersedes_version_id"], versions[1]["version_id"])
+
+    def test_relevant_documents_are_fetched_concurrently_and_publish_progress(self) -> None:
+        seeded = seed_demo(self.db_path)
+        source_id = seed_regulatory_sources(self.db_path)["NCA"]
+        request = RegulatoryScanCreate(
+            company_snapshot_id=seeded["discovery_company_snapshot_id"], source_ids=[source_id],
+            idempotency_key="parallel-fetch-progress",
+        )
+        scan, _ = create_regulatory_scan(request, self.db_path)
+        connector = _ParallelFetchConnector(source_id, "")
+        result = execute_regulatory_scan(
+            scan["scan_id"], request=request, db_path=self.db_path,
+            connector_overrides={source_id: connector},
+        )
+        self.assertGreaterEqual(connector.max_active_fetches, 2)
+        self.assertEqual(4, result["summary"]["processed_documents"])
+        self.assertEqual("completed", result["summary"]["stage"])
+        self.assertEqual(4, len(db.get_scan_results(scan["scan_id"], self.db_path)))
 
     def test_irrelevant_saso_document_is_filtered_before_fetch(self) -> None:
         seeded = seed_demo(self.db_path)

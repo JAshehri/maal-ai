@@ -23,6 +23,8 @@
 ├── migrations/002_platform_expansion.sql # سجل المصادر والمسح وExport/GRC
 ├── migrations/003_core_differentiators.sql # مستندات المنشأة والاعتماد والمراجعة والتعرض
 ├── migrations/004_real_company_onboarding.sql # ملف الشركة المنسخ والنطاق وأدلة الاستخراج
+├── migrations/006_local_user_authentication.sql # حسابات المدير والموظف والجلسات
+├── migrations/007_requirement_assessments_and_feedback.sql # مطابقة المتطلبات وتصحيح الموظف
 ├── src/
 │   ├── schemas.py               # عقود Source إلى RunState
 │   ├── settings.py              # إعدادات ومسارات وتحميل .env
@@ -36,6 +38,7 @@
 │   ├── company_documents.py     # استخراج متعدد الصيغ مع page/section/slide/sheet/cell/line
 │   ├── compliance_review.py     # مراجعة عند الطلب وwatch window وdependency graph والتعرض
 │   ├── onboarding.py            # استخراج ملف الشركة والنطاق الإلزامي والمراجعة والاعتماد
+│   ├── requirement_matching.py  # موضع الدليل وحالة التطبيق والمقارنات الرقمية
 │   ├── review_service.py        # قبول وتعديل ورفض مع revision
 │   ├── regulatory/              # NCA وSASO وManual Export/قطاع
 │   ├── grc.py                   # GRCIntegrationService وLocal adapter
@@ -78,7 +81,7 @@ python -c "from src.db import init_db; init_db()"
 المجموعة الحتمية لا تحتاج مفتاح API:
 
 ```powershell
-python -m unittest discover -s tests -v
+python -m pytest tests -q
 ```
 
 تشمل: تغيرًا رقميًا، نسختين متطابقتين، تغيرًا تحريريًا، عدم الانطباق، نقص الدليل، تعارض الأدلة، النفي والاستثناء، اختلاف الوحدة، الاستئناف، منع تكرار المهمة، منع المراجع غير المخول، رفض revision قديم، حقن تعليمات داخل الوثيقة، الصيغ الست وlocators، ورحلة رفع مشروع يستخدم requirement قديم حتى score والـcitation والتعرض المالي.
@@ -102,10 +105,14 @@ $env:DEMO_MODE="true"
 uvicorn app:app --reload --port 8000
 ```
 
-الأدوار تمر في رؤوس الديمو: `X-Role: admin|analyst|reviewer` و`X-User-Id`. عند وضع `MAAL_API_TOKEN` يجب إرسال `X-API-Token` أيضًا. هذا RBAC أساسي للديمو، وليس بديلًا عن SSO في الإنتاج.
+عند أول فتح تظهر شاشة إعداد لإنشاء مدير النظام. بعد ذلك يكون الدخول باسم مستخدم وكلمة مرور، وتُحفظ كلمات المرور باستخدام PBKDF2 ولا تُخزن كنص صريح. المدير يستطيع إدارة المستخدمين واعتماد ملف الشركة وحذف الملفات واتخاذ قرار المراجعة البشرية؛ موظف الامتثال يستطيع الاطلاع ورفع الأدلة وتشغيل المسح والمراجعات. جلسة الويب صالحة 12 ساعة ويمكن إلغاؤها بتسجيل الخروج. تظل رؤوس `X-Role` و`X-User-Id` متاحة للاختبارات والتكامل المحلي القديم فقط، وليست آلية دخول الواجهة.
 
 ## نقاط API
 
+- `GET /auth/status` يحدد هل تم إنشاء المدير الأول.
+- `POST /auth/setup` ينشئ أول مدير مرة واحدة فقط، و`POST /auth/login` ينشئ جلسة دخول.
+- `GET /auth/me` يعيد المستخدم الحالي، و`POST /auth/logout` يلغي الجلسة.
+- `GET /auth/users` و`POST /auth/users` لإدارة الحسابات بصلاحية المدير فقط.
 - `POST /runs` يعيد `202` ويستخدم `idempotency_key`.
 - `GET /runs/{id}` يعرض المرحلة وcheckpoint.
 - `GET /runs/{id}/findings` يعرض النتائج والمهام والتدقيق.
@@ -130,11 +137,12 @@ uvicorn app:app --reload --port 8000
 - `GET /compliance-reviews/{id}` للنتيجة والـscore والاستشهاد والتعرض.
 - `GET /compliance-reviews/{id}/report` يجمع نتيجة المراجعة مع impact graph والتوضيحات.
 - `GET /impact-graph` لسلسلة `Regulation → Article → Obligation → Internal Document → Section → Department → Project` المخزنة فعليًا.
+- `POST /analysis-feedback` لتأكيد أو رفض وتصحيح قرار الانطباق أو حالة تطبيق المتطلب مع حفظ هوية الموظف وبصمة الدليل.
 - `GET /ui/overview` خاص بوضع `DEMO_MODE=true` ويرجع 404 في الوضع العادي.
 
 ## الواجهة المؤسسية
 
-الواجهة عبارة عن SPA عربية/إنجليزية بست صفحات واضحة: Dashboard، Regulatory Analysis، File Compliance Review، Impact Traceability، Financial Exposure، وHuman Review. تغيير اللغة يغيّر اتجاه الصفحة وكامل تسميات الواجهة، بينما يبقى النص التنظيمي الأصلي بلغته ولا يُترجم أو يُستبدل. النصوص الطويلة تظهر كملخص ويمكن فتح النص الكامل عند الطلب، وسجل التدقيق مخفي افتراضيًا داخل Technical Details.
+الواجهة عبارة عن SPA عربية/إنجليزية بصفحات واضحة تشمل Dashboard، Regulatory Analysis، File Compliance Review، Impact Traceability، Human Review، وإدارة المستخدمين للمدير. تظهر Financial Exposure فقط عند وجود مدخلات فعلية ومعتمدة. تغيير اللغة يغيّر اتجاه الصفحة وكامل تسميات الواجهة، بينما يبقى النص التنظيمي الأصلي بلغته ولا يُترجم أو يُستبدل. يعرض التحليل اسم ملف الشركة والموضع الدقيق وحالة تطبيق كل متطلب، ويستطيع موظف الامتثال تأكيد أو رفض وتصحيح تصنيف الوكيل مع تعليق. تعرض نتيجة مراجعة الملف اسم الملف والموضع الدقيق حسب الصيغة (السطر أو الصفحة أو القسم/الفقرة أو الشريحة أو الورقة/الخلية)، والنص غير المتوافق، والاستشهاد الحالي، والتصحيح المقترح. النصوص الطويلة تظهر كملخص ويمكن فتح النص الكامل عند الطلب، وسجل التدقيق مخفي افتراضيًا داخل Technical Details.
 
 مثال تشغيل عبر API:
 
@@ -164,6 +172,7 @@ Invoke-RestMethod http://127.0.0.1:8000/runs -Method Post -Headers $headers -Con
 
 مرجع إغلاق قسم المنتج: [docs/MAAL_PRODUCT_DEFINITION_AND_ROADMAP_AR.md](docs/MAAL_PRODUCT_DEFINITION_AND_ROADMAP_AR.md).
 مرجع دور AI والأمن والخصوصية: [docs/MAAL_AI_SECURITY_OPERATING_MODEL_AR.md](docs/MAAL_AI_SECURITY_OPERATING_MODEL_AR.md).
+التقرير التفصيلي للمنظومة والمطابقة والمراجعة البشرية: [docs/MAAL_SYSTEM_DETAILED_REPORT_AR.md](docs/MAAL_SYSTEM_DETAILED_REPORT_AR.md).
 
 - الوثائق التنظيمية تعامل كبيانات غير موثوقة، ولا تنفذ تعليماتها. يوجد اختبار حقن صريح.
 - لا تتحول ثقة النموذج إلى احتمال صحة. تعرض النتيجة جودة المصدر وحداثة الدليل وصحة الاستشهاد وكفاية الانطباق منفصلة.
@@ -180,6 +189,8 @@ Invoke-RestMethod http://127.0.0.1:8000/runs -Method Post -Headers $headers -Con
 
 - العامل داخل عملية FastAPI مناسب للديمو فقط. للإنتاج: عامل طابور منفصل ومراقبة وإعادة محاولات موزعة.
 - SQLite مناسب لمستخدم واحد في العرض. عند تعدد العمال: PostgreSQL مع migrations معاملاتية وعزل منشآت.
+- نشر Render المجاني الحالي يستخدم SQLite وتخزين الملفات داخل `/tmp`؛ قد يفقد بياناته عند إعادة التشغيل أو إعادة النشر، وقد يتأخر أول طلب بسبب الاستيقاظ البارد. هذا مناسب لعرض مؤقت فقط وليس توافرًا إنتاجيًا.
+- تنزيل الوثائق المتوافقة متوازٍ بصورة محدودة. يمكن ضبطه عبر `MAAL_CONNECTOR_CONCURRENCY`؛ القيمة الافتراضية 4 لتقليل الزمن دون الضغط على المواقع الرسمية.
 - استخراج النص يدعم النصوص الحالية، وليس OCR/PDF العربي المتقدم.
 - ملفات PDF المصورة تحتاج OCR غير موجود في MVP. DOCX/XLSX/PPTX تُقرأ من بنية OOXML؛ الرسومات والمعادلات والكائنات المضمنة لا تُحلل دلاليًا.
 - استرجاع الـOn-Demand في الـMVP حتمي بالمادة والقيم المرتبطة بالتغييرات النشطة؛ التوسع يحتاج فهرس بحث كامل ومعجم مرادفات دون استبدال التحقق القاعدي.

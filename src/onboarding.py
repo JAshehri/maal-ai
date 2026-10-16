@@ -472,6 +472,9 @@ def approve_profile(company_id: str, *, expected_version: int, profile_edits: di
                                name=current["company"]["name"], jurisdiction=(jurisdictions[0] if jurisdictions else "UNKNOWN"),
                                activities=activities, assets=[], attributes=attributes)
     db.insert_company_snapshot(snapshot, db_path)
+    materialize_approved_company_evidence(
+        snapshot_id, profile_version_id=version_id, db_path=db_path, strict=True,
+    )
     payload = {"activities": activities, "products_services": products, "departments": departments,
                "technologies": attributes["technologies"], "jurisdictions": jurisdictions,
                "facts": facts, "user_confirmed": profile_edits}
@@ -481,6 +484,55 @@ def approve_profile(company_id: str, *, expected_version: int, profile_edits: di
         connection.execute("UPDATE company_profiles SET status='approved', updated_at=? WHERE company_id=?", (_now(), company_id))
         connection.execute("UPDATE onboarding_status SET status='completed', current_step='dashboard', updated_at=? WHERE company_id=?", (_now(), company_id))
     return get_onboarding(company_id, db_path)
+
+
+def materialize_approved_company_evidence(
+    company_snapshot_id: str, *, profile_version_id: str | None = None,
+    db_path=None, strict: bool = False,
+) -> dict[str, Any]:
+    """Make approved onboarding files available to requirement-level matching.
+
+    This idempotent bridge also covers profiles approved before the requirement
+    matching feature existed. It is intentionally called by the background scan,
+    not application startup, so opening Maal remains fast.
+    """
+    from .company_documents import ingest_company_document
+
+    with db.connect(db_path) as connection:
+        rows = connection.execute(
+            """SELECT od.filename, od.mime_type, od.storage_uri
+                 FROM company_profile_versions v
+                 JOIN onboarding_documents od USING(profile_version_id)
+                WHERE (v.company_snapshot_id=? AND v.status='approved')
+                   OR v.profile_version_id=?
+                ORDER BY od.created_at""",
+            (company_snapshot_id, profile_version_id or ""),
+        ).fetchall()
+    created_before = len(db.list_company_documents(company_snapshot_id, db_path))
+    unavailable: list[str] = []
+    failed: list[dict[str, str]] = []
+    for item in rows:
+        path = (settings.root_dir / item["storage_uri"]).resolve()
+        if not path.exists():
+            unavailable.append(item["filename"])
+            if strict:
+                raise ValueError(f"stored company document is unavailable: {item['filename']}")
+            continue
+        try:
+            ingest_company_document(
+                raw=path.read_bytes(), filename=item["filename"], mime_type=item["mime_type"],
+                company_snapshot_id=company_snapshot_id, document_kind="other", title=item["filename"],
+                department=None, project_id=None, db_path=db_path,
+            )
+        except Exception as exc:
+            failed.append({"filename": item["filename"], "error": type(exc).__name__})
+            if strict:
+                raise
+    created_after = len(db.list_company_documents(company_snapshot_id, db_path))
+    return {
+        "documents_seen": len(rows), "documents_created": max(0, created_after - created_before),
+        "documents_available": created_after, "unavailable": unavailable, "failed": failed,
+    }
 
 
 def live_ui_overview(company_id: str, db_path=None) -> dict[str, Any]:
@@ -500,6 +552,22 @@ def live_ui_overview(company_id: str, db_path=None) -> dict[str, Any]:
                WHERE s.profile_version_id=? AND s.status!='removed' ORDER BY d.name_en""",
             (onboarding["profile_version"]["profile_version_id"],),
         ).fetchall()
+        task_rows = connection.execute(
+            """SELECT t.payload_json FROM task_drafts t JOIN runs r USING(run_id)
+               WHERE r.company_snapshot_id=? ORDER BY t.updated_at DESC""",
+            (snapshot_id,),
+        ).fetchall()
+        audit_rows = connection.execute(
+            """SELECT a.* FROM audit_events a JOIN runs r USING(run_id)
+               WHERE r.company_snapshot_id=? ORDER BY a.created_at DESC LIMIT 100""",
+            (snapshot_id,),
+        ).fetchall()
+        feedback_rows = connection.execute(
+            """SELECT decision, comment, reviewer_id, reviewer_role, created_at
+                 FROM analysis_feedback WHERE company_id=?
+                 ORDER BY created_at DESC LIMIT 100""",
+            (company_id,),
+        ).fetchall()
     sources = [item for item in db.list_sources(db_path) if item["authority"] in {"NCA", "SASO"} and item["enabled"]]
     scan = dict(scan_row) if scan_row else None
     results = db.get_scan_results(scan["scan_id"], db_path) if scan else []
@@ -517,9 +585,9 @@ def live_ui_overview(company_id: str, db_path=None) -> dict[str, Any]:
         departments.update(item["department_ids"])
         if item["priority"] == "high": high_priority += 1
         document = db.get_regulatory_document(item["document_id"], db_path)
-        current_version = db.get_document_version(item["version_id"], db_path) if item.get("version_id") else None
+        current_version = db.get_document_version_preview(item["version_id"], db_path) if item.get("version_id") else None
         previous_version = (
-            db.get_document_version(item["previous_version_id"], db_path)
+            db.get_document_version_preview(item["previous_version_id"], db_path)
             if item.get("previous_version_id") and item.get("previous_version_id") != item.get("version_id")
             else None
         )
@@ -530,6 +598,7 @@ def live_ui_overview(company_id: str, db_path=None) -> dict[str, Any]:
         else:
             recommended_action = "Review applicability and map the current regulation to approved company controls."
         regulations.append({
+            "document_id": item["document_id"],
             "regulation_name": item["title"], "authority": item["authority"],
             "jurisdiction": document.jurisdiction if document else "SA",
             "domain": document.regulatory_domain if document else "—", "category": document.category if document else None,
@@ -539,14 +608,68 @@ def live_ui_overview(company_id: str, db_path=None) -> dict[str, Any]:
             "applicability": item["applicability_status"], "applicability_reason": item["applicability_rationale"],
             "priority": item["priority"], "department": ", ".join(item["department_ids"]) or "Needs confirmation",
             "affected_files": item["affected_files"], "estimated_exposure": None, "currency": None,
+            "feedback_target_id": item.get("feedback_target_id"), "feedback": item.get("feedback"),
             "has_previous_version": bool(previous_version),
-            "current_text": current_version.get("content") if current_version else None,
-            "previous_text": previous_version.get("content") if previous_version else None,
+            "current_version_id": current_version.get("version_id") if current_version else None,
+            "previous_version_id": previous_version.get("version_id") if previous_version else None,
+            "current_text": current_version.get("content", "")[:1200] if current_version else None,
+            "previous_text": previous_version.get("content", "")[:1200] if previous_version else None,
             "change_previews": item["change_previews"],
             "recommended_action": recommended_action,
         })
     scopes = [dict(row) for row in scope_rows]
     unconnected = [item for item in scopes if item["classification"] == "mandatory" and not item["connector_authority"]]
+    tasks = []
+    for row in task_rows:
+        task = json.loads(row["payload_json"])
+        reviews = db.list_reviews(task["task_id"], db_path)
+        tasks.append({
+            "task_id": task["task_id"], "action": task["action"],
+            "owner_role": task.get("owner_role"), "proposed_due_date": task.get("proposed_due_date"),
+            "review_status": task["review_status"], "revision": task["revision"],
+            "reviews": [{"decision": review["decision"], "comment": review["comment"],
+                         "reviewer": review["reviewer_id"], "created_at": review["created_at"]}
+                        for review in reviews],
+        })
+    audit_events = []
+    for row in audit_rows:
+        item = dict(row)
+        audit_events.append({"action": item["action"], "reason_summary": item["reason_summary"],
+                             "created_at": item["created_at"], "actor_role": item["actor_role"]})
+    for row in feedback_rows:
+        audit_events.append({
+            "action": f"analysis_feedback_{row['decision']}",
+            "reason_summary": row["comment"],
+            "created_at": row["created_at"],
+            "actor_role": row["reviewer_role"],
+        })
+    if scan:
+        for event in reversed(db.list_source_fetch_events(scan["scan_id"], db_path)):
+            audit_events.append({
+                "action": f"regulatory_source_{event['status']}",
+                "reason_summary": event.get("error_message") or event["canonical_url"],
+                "created_at": event["finished_at"], "actor_role": "system",
+            })
+    audit_events.sort(key=lambda item: item["created_at"], reverse=True)
+    from .compliance_review import impact_graph
+    graph = impact_graph(db_path, company_snapshot_id=snapshot_id)
+    trace_paths = []
+    for dep in graph["dependencies"]:
+        locator = dep.get("locator") or {}
+        section = dep.get("section_ref") or (
+            f"Page {locator['page']}" if locator.get("page") else
+            f"Slide {locator['slide']}" if locator.get("slide") else
+            f"{locator.get('sheet')} · {locator.get('cell')}" if locator.get("sheet") else
+            f"Line {locator['line_start']}" if locator.get("line_start") else "Document section"
+        )
+        trace_paths.append({
+            "regulation": dep["authority"], "article": dep["article_ref"],
+            "requirement": f"Requirement — {dep['article_ref']}",
+            "document": dep["document_title"], "section": section,
+            "department": dep["department"], "project": dep.get("project_id"),
+            "relationship": dep["relationship_type"],
+            "evidence": dep.get("document_quote"),
+        })
     return {
         "company": {"name": onboarding["company"]["name"], "company_id": company_id,
                     "snapshot_id": snapshot_id, "profile_version": onboarding["profile_version"]["version_no"]},
@@ -563,4 +686,9 @@ def live_ui_overview(company_id: str, db_path=None) -> dict[str, Any]:
         "regulations": regulations, "unconnected_domains": unconnected,
         "financial": {"remediation": None, "project_delay": None, "downtime": None,
                       "contractual": None, "direct_penalty": None, "total": None, "currency": None},
+        "traceability": {"nodes": [{"type": node["type"], "label": node["label"]}
+                                    for node in graph["nodes"]], "paths": trace_paths},
+        "human_review": {"tasks": tasks,
+                         "pending_count": sum(1 for item in tasks if item["review_status"] == "pending_human_review"),
+                         "audit_events": audit_events[:100]},
     }

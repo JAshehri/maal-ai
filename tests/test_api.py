@@ -54,6 +54,13 @@ class ApiIntegrationTests(unittest.TestCase):
         findings = self.client.get(f"/runs/{run_id}/findings", headers=self.analyst).json()
         self.assertEqual(1, len(findings["tasks"]))
 
+    def test_system_report_is_downloadable(self) -> None:
+        response = self.client.get("/reports/system")
+        self.assertEqual(200, response.status_code, response.text)
+        self.assertEqual("application/pdf", response.headers["content-type"])
+        self.assertTrue(response.content.startswith(b"%PDF-"))
+        self.assertGreater(len(response.content), 100_000)
+
     def test_capabilities_are_truthful_and_identity_is_required(self) -> None:
         missing_identity = self.client.get("/system/capabilities", headers={"X-Role": "analyst"})
         self.assertEqual(401, missing_identity.status_code)
@@ -66,6 +73,38 @@ class ApiIntegrationTests(unittest.TestCase):
         self.assertTrue(payload["ai"]["human_review_required"])
         self.assertFalse(payload["security"]["authentication"]["production_ready"])
         self.assertNotIn("api_keys", response.text.casefold())
+
+    def test_interactive_login_and_role_boundaries(self) -> None:
+        status = self.client.get("/auth/status")
+        self.assertEqual(200, status.status_code)
+        if not status.json()["initialized"]:
+            setup = self.client.post("/auth/setup", json={
+                "username": "maal-admin", "display_name": "Maal Administrator",
+                "password": "Strong-Admin-Password-2026",
+            })
+            self.assertEqual(201, setup.status_code, setup.text)
+            admin_token = setup.json()["access_token"]
+        else:
+            login_response = self.client.post("/auth/login", json={
+                "username": "maal-admin", "password": "Strong-Admin-Password-2026",
+            })
+            self.assertEqual(200, login_response.status_code, login_response.text)
+            admin_token = login_response.json()["access_token"]
+        admin_bearer = {"Authorization": f"Bearer {admin_token}"}
+        me = self.client.get("/auth/me", headers=admin_bearer)
+        self.assertEqual("admin", me.json()["user"]["role"])
+        employee = self.client.post("/auth/users", headers=admin_bearer, json={
+            "username": "compliance.employee", "display_name": "Compliance Employee",
+            "password": "Strong-Employee-Password-2026", "role": "analyst",
+        })
+        self.assertIn(employee.status_code, {201, 409}, employee.text)
+        employee_login = self.client.post("/auth/login", json={
+            "username": "compliance.employee", "password": "Strong-Employee-Password-2026",
+        })
+        self.assertEqual(200, employee_login.status_code, employee_login.text)
+        employee_bearer = {"Authorization": f"Bearer {employee_login.json()['access_token']}"}
+        self.assertEqual(403, self.client.get("/auth/users", headers=employee_bearer).status_code)
+        self.assertEqual(200, self.client.get("/company-documents", headers=employee_bearer).status_code)
 
     def test_unauthorized_and_stale_review_status_codes(self) -> None:
         run_id = self._start_run("api-review-0001")
@@ -98,6 +137,9 @@ class ApiIntegrationTests(unittest.TestCase):
         self.assertEqual(201, response.status_code, response.text)
         review = response.json()["review"]
         self.assertEqual("non_compliant", review["findings"][0]["status"])
+        self.assertEqual("proposal.txt", review["findings"][0]["document_filename"])
+        self.assertEqual("line", review["findings"][0]["locator"]["locator_type"])
+        self.assertIsNotNone(review["findings"][0]["locator"]["line_start"])
         self.assertEqual("Recently superseded requirement detected", review["summary"]["warning"])
         graph = self.client.get("/impact-graph", headers=self.analyst)
         self.assertEqual(200, graph.status_code)
@@ -108,6 +150,14 @@ class ApiIntegrationTests(unittest.TestCase):
         self.assertEqual(200, response.status_code)
         self.assertIn("Article 5.1", response.text)
         self.assertIn("100 mg/Nm3", response.text)
+
+    def test_original_version_text_is_loaded_on_demand(self) -> None:
+        context = self.client.get("/demo/context", headers=self.analyst).json()
+        response = self.client.get(
+            f"/documents/versions/{context['new_version_id']}/text", headers=self.analyst
+        )
+        self.assertEqual(200, response.status_code, response.text)
+        self.assertIn("Article 5.1", response.json()["text"])
 
     def test_enterprise_ui_overview_is_sanitized(self) -> None:
         response = self.client.get("/ui/overview", headers=self.analyst)

@@ -164,6 +164,20 @@ def get_document_version(version_id: str, db_path: Path | str | None = None) -> 
     return dict(row) if row else None
 
 
+def get_document_version_preview(
+    version_id: str, db_path: Path | str | None = None, *, limit: int = 1200
+) -> dict[str, Any] | None:
+    """Return version metadata with a bounded excerpt for responsive list views."""
+    with connect(db_path) as connection:
+        row = connection.execute(
+            """SELECT version_id, source_id, document_id, published_at, effective_at,
+                      retrieved_at, supersedes_version_id, substr(content, 1, ?) AS content
+               FROM document_versions WHERE version_id=?""",
+            (limit, version_id),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def list_document_versions(source_id: str | None = None, db_path: Path | str | None = None) -> list[dict[str, Any]]:
     sql, params = "SELECT * FROM document_versions", ()
     if source_id:
@@ -705,8 +719,12 @@ def upsert_scan_document_result(result: dict[str, Any], db_path: Path | str | No
 
 def get_scan_results(scan_id: str, db_path: Path | str | None = None) -> list[dict[str, Any]]:
     with connect(db_path) as connection:
+        scan_row = connection.execute(
+            "SELECT company_snapshot_id, company_id FROM regulatory_scan_runs WHERE scan_id=?",
+            (scan_id,),
+        ).fetchone()
         rows = connection.execute(
-            """SELECT r.*, d.title, d.authority, d.category, d.canonical_url, d.download_url
+            """SELECT r.*, d.source_id, d.title, d.authority, d.category, d.canonical_url, d.download_url
                FROM scan_document_results r JOIN regulatory_documents d USING(document_id)
                WHERE r.scan_id=? ORDER BY d.authority, d.title""",
             (scan_id,),
@@ -728,10 +746,37 @@ def get_scan_results(scan_id: str, db_path: Path | str | None = None) -> list[di
             }
             for item in changes[:20]
         ]
-        data["affected_files"] = []
+        assessments = []
+        if scan_row and data.get("version_id"):
+            with connect(db_path) as connection:
+                assessment_rows = connection.execute(
+                    """SELECT a.*, cd.filename, cd.title AS document_title, cd.department,
+                              cd.project_id
+                         FROM requirement_assessments a
+                         JOIN company_documents cd USING(company_document_id)
+                        WHERE a.company_snapshot_id=? AND a.version_id=?
+                        ORDER BY a.article_ref, cd.filename""",
+                    (scan_row["company_snapshot_id"], data["version_id"]),
+                ).fetchall()
+            for assessment in assessment_rows:
+                item = dict(assessment)
+                item["locator"] = json.loads(item.pop("locator_json"))
+                item["comparison"] = json.loads(item.pop("comparison_json"))
+                item["feedback"] = latest_analysis_feedback(
+                    company_id=scan_row["company_id"], subject_key=f"requirement:{item['clause_id']}",
+                    evidence_fingerprint=item["evidence_fingerprint"], db_path=db_path,
+                )
+                assessments.append(item)
+        data["affected_files"] = assessments
         data["affected_files_status"] = (
-            "no_traceable_internal_file_evidence" if data.get("analysis_run_id") else "not_analyzed_without_change"
+            "traceable_assessments_available" if assessments else "no_traceable_internal_file_evidence"
         )
+        target_id = stable_id("applicability", scan_id, data["document_id"])
+        data["feedback_target_id"] = target_id
+        data["feedback"] = latest_analysis_feedback(
+            company_id=scan_row["company_id"] if scan_row else "unknown",
+            subject_key=f"regulatory-document:{data['document_id']}", db_path=db_path,
+        ) if scan_row else None
         data["financial_exposure"] = {
             "status": "not_enough_data",
             "label": "Estimated Financial Exposure",
@@ -746,6 +791,43 @@ def get_scan_results(scan_id: str, db_path: Path | str | None = None) -> list[di
         )
         result.append(data)
     return result
+
+
+def add_analysis_feedback(item: dict[str, Any], db_path=None) -> dict[str, Any]:
+    feedback_id = stable_id(
+        "feedback", item["company_id"], item["target_type"], item["target_id"],
+        item["reviewer_id"], _now(),
+    )
+    with connect(db_path) as connection:
+        connection.execute(
+            """INSERT INTO analysis_feedback
+               (feedback_id, company_id, target_type, target_id, subject_key,
+                evidence_fingerprint, decision, corrected_value, comment,
+                reviewer_id, reviewer_role, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (feedback_id, item["company_id"], item["target_type"], item["target_id"],
+             item["subject_key"], item.get("evidence_fingerprint"), item["decision"],
+             item.get("corrected_value"), item["comment"], item["reviewer_id"],
+             item["reviewer_role"], _now()),
+        )
+        row = connection.execute(
+            "SELECT * FROM analysis_feedback WHERE feedback_id=?", (feedback_id,)
+        ).fetchone()
+    return dict(row)
+
+
+def latest_analysis_feedback(*, company_id: str, subject_key: str,
+                             evidence_fingerprint: str | None = None, db_path=None) -> dict[str, Any] | None:
+    sql = """SELECT * FROM analysis_feedback
+              WHERE company_id=? AND subject_key=?"""
+    params: list[Any] = [company_id, subject_key]
+    if evidence_fingerprint:
+        sql += " AND (evidence_fingerprint=? OR evidence_fingerprint IS NULL)"
+        params.append(evidence_fingerprint)
+    sql += " ORDER BY created_at DESC LIMIT 1"
+    with connect(db_path) as connection:
+        row = connection.execute(sql, params).fetchone()
+    return dict(row) if row else None
 
 
 def list_source_fetch_events(scan_id: str, db_path: Path | str | None = None) -> list[dict[str, Any]]:
@@ -945,7 +1027,8 @@ def insert_dependency(item: dict[str, Any], db_path=None) -> dict[str, Any]:
 
 
 
-def list_dependencies(*, company_document_id: str | None = None, article_ref: str | None = None, db_path=None) -> list[dict[str, Any]]:
+def list_dependencies(*, company_document_id: str | None = None, article_ref: str | None = None,
+                      company_snapshot_id: str | None = None, db_path=None) -> list[dict[str, Any]]:
     sql = """SELECT d.*, cd.title AS document_title, cd.filename, c.locator_json, c.section_ref,
                     c.text AS document_quote, s.authority
              FROM document_dependencies d JOIN company_documents cd USING(company_document_id)
@@ -953,6 +1036,7 @@ def list_dependencies(*, company_document_id: str | None = None, article_ref: st
     params: list[Any] = []
     if company_document_id: sql += " AND d.company_document_id=?"; params.append(company_document_id)
     if article_ref: sql += " AND d.article_ref=?"; params.append(article_ref)
+    if company_snapshot_id: sql += " AND cd.company_snapshot_id=?"; params.append(company_snapshot_id)
     with connect(db_path) as connection: rows = connection.execute(sql, params).fetchall()
     result=[]
     for row in rows:
@@ -987,13 +1071,36 @@ def get_financial_input(snapshot_id: str, db_path=None) -> dict[str, Any] | None
 
 def get_compliance_review(review_id: str, db_path=None) -> dict[str, Any] | None:
     with connect(db_path) as connection:
-        row=connection.execute("SELECT * FROM compliance_reviews WHERE compliance_review_id=?", (review_id,)).fetchone()
-        findings=connection.execute("SELECT * FROM compliance_review_findings WHERE compliance_review_id=? ORDER BY severity DESC, article_ref", (review_id,)).fetchall()
+        row=connection.execute(
+            """SELECT r.*, d.filename AS document_filename, d.title AS document_title,
+                      d.document_kind, d.department AS document_department, d.project_id
+                 FROM compliance_reviews r
+                 JOIN company_documents d USING(company_document_id)
+                WHERE r.compliance_review_id=?""", (review_id,)
+        ).fetchone()
+        findings=connection.execute(
+            """SELECT f.*, evidence_doc.filename AS evidence_filename,
+                      evidence_doc.title AS evidence_document_title
+                 FROM compliance_review_findings f
+                 LEFT JOIN company_document_chunks evidence_chunk
+                   ON evidence_chunk.chunk_id=f.company_chunk_id
+                 LEFT JOIN company_documents evidence_doc
+                   ON evidence_doc.company_document_id=evidence_chunk.company_document_id
+                WHERE f.compliance_review_id=? ORDER BY f.severity DESC, f.article_ref""",
+            (review_id,),
+        ).fetchall()
         exposure=connection.execute("SELECT * FROM financial_exposures WHERE compliance_review_id=?", (review_id,)).fetchone()
     if not row: return None
     data=dict(row); data["summary"] = json.loads(data.pop("summary_json")); data["findings"]=[]
     for finding in findings:
-        item=dict(finding); item["locator"] = json.loads(item.pop("locator_json")) if item.get("locator_json") else None; data["findings"].append(item)
+        item=dict(finding); item["locator"] = json.loads(item.pop("locator_json")) if item.get("locator_json") else None
+        item["document_filename"] = item.pop("evidence_filename") or data["document_filename"]
+        item["document_title"] = item.pop("evidence_document_title") or data["document_title"]
+        item["feedback"] = latest_analysis_feedback(
+            company_id=data["company_id"], subject_key=f"compliance-finding:{item['requirement_id']}",
+            db_path=db_path,
+        )
+        data["findings"].append(item)
     if exposure:
         e=dict(exposure); e["breakdown"]=json.loads(e.pop("breakdown_json")); e["formula"]=json.loads(e.pop("formula_json")); data["financial_exposure"]=e
     else: data["financial_exposure"]={"status":"not_enough_data"}

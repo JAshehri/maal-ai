@@ -11,7 +11,10 @@ from fastapi.staticfiles import StaticFiles
 
 from src import db
 from src.ai_policy import ai_operating_posture, product_capabilities
-from src.auth import AuthenticationFailure, authenticate, authentication_posture
+from src.auth import (
+    AuthenticationFailure, authenticate, authentication_posture, create_user,
+    has_users, list_users, login, logout, setup_first_admin,
+)
 from src.company_documents import ingest_company_document
 from src.compliance_review import create_compliance_review, impact_graph, seed_core_demo, ui_overview
 from src.onboarding import (
@@ -31,8 +34,10 @@ from src.regulatory.manual import register_manual_export_regulation
 from src.regulatory.registry import seed_regulatory_sources
 from src.review_service import ReviewForbidden, RevisionConflict, review_task
 from src.schemas import (
-    CompanyProfileApproval, ComplianceReviewCreate, DocumentVersionCreate, ExportSectorRegulationCreate, GRCTaskCreate,
+    AnalysisFeedbackCreate, AuthLogin, AuthSetup, CompanyProfileApproval, ComplianceReviewCreate, DocumentVersionCreate,
+    ExportSectorRegulationCreate, GRCTaskCreate,
     RegulatoryScanCreate, ReviewRequest, RunCreate, Source, SourceCreate,
+    UserCreate,
 )
 from src.settings import settings
 
@@ -58,10 +63,11 @@ app.add_middleware(
     allow_origins=list(settings.allowed_origins),
     allow_credentials=False,
     allow_methods=["GET", "POST", "DELETE"],
-    allow_headers=["Content-Type", "X-Role", "X-User-Id", "X-API-Token"],
+    allow_headers=["Content-Type", "Authorization", "X-Role", "X-User-Id", "X-API-Token"],
 )
 
 STATIC_DIR = settings.root_dir / "static"
+SYSTEM_REPORT_PDF = settings.root_dir / "output" / "pdf" / "Maal_Full_System_Report_AR.pdf"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -70,13 +76,20 @@ def require_roles(*allowed: str) -> Callable:
         x_role: Annotated[str | None, Header(alias="X-Role")] = None,
         x_user_id: Annotated[str | None, Header(alias="X-User-Id")] = None,
         x_api_token: Annotated[str | None, Header(alias="X-API-Token")] = None,
+        authorization: Annotated[str | None, Header(alias="Authorization")] = None,
     ) -> tuple[str, str]:
+        bearer_token = None
+        if authorization:
+            scheme, _, credentials = authorization.partition(" ")
+            if scheme.casefold() == "bearer" and credentials.strip():
+                bearer_token = credentials.strip()
         try:
             identity = authenticate(
                 allowed_roles=allowed,
                 x_role=x_role,
                 x_user_id=x_user_id,
                 x_api_token=x_api_token,
+                bearer_token=bearer_token,
             )
         except AuthenticationFailure as exc:
             raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
@@ -84,9 +97,81 @@ def require_roles(*allowed: str) -> Callable:
     return dependency
 
 
+@app.get("/auth/status")
+def auth_status() -> dict:
+    return {"initialized": has_users(), "roles": ["admin", "analyst"]}
+
+
+@app.post("/auth/setup", status_code=201)
+def auth_setup(payload: AuthSetup) -> dict:
+    try:
+        user = setup_first_admin(**payload.model_dump())
+        return login(username=payload.username, password=payload.password)
+    except PermissionError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/auth/login")
+def auth_login(payload: AuthLogin) -> dict:
+    try:
+        return login(**payload.model_dump())
+    except AuthenticationFailure as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+
+@app.post("/auth/logout", status_code=204)
+def auth_logout(
+    authorization: Annotated[str | None, Header(alias="Authorization")] = None,
+    _: tuple[str, str] = Depends(require_roles("admin", "analyst")),
+) -> Response:
+    if authorization:
+        scheme, _, credentials = authorization.partition(" ")
+        if scheme.casefold() == "bearer" and credentials.strip():
+            logout(credentials.strip())
+    return Response(status_code=204)
+
+
+@app.get("/auth/me")
+def auth_me(identity: tuple[str, str] = Depends(require_roles("admin", "analyst"))) -> dict:
+    user_id, role = identity
+    user = next((item for item in list_users() if item["user_id"] == user_id), None)
+    return {"user": user or {"user_id": user_id, "display_name": user_id, "username": user_id,
+                             "role": role, "active": True}}
+
+
+@app.get("/auth/users")
+def auth_users(_: tuple[str, str] = Depends(require_roles("admin"))) -> dict:
+    return {"users": list_users()}
+
+
+@app.post("/auth/users", status_code=201)
+def auth_create_user(
+    payload: UserCreate,
+    _: tuple[str, str] = Depends(require_roles("admin")),
+) -> dict:
+    try:
+        return {"user": create_user(**payload.model_dump())}
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 @app.get("/", include_in_schema=False)
 def home() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/reports/system", include_in_schema=False)
+def system_report() -> Response:
+    """Download the published Arabic product and architecture report."""
+    if not SYSTEM_REPORT_PDF.is_file():
+        raise HTTPException(status_code=404, detail="system report is not available")
+    return Response(
+        content=SYSTEM_REPORT_PDF.read_bytes(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": 'inline; filename="Maal_Full_System_Report_AR.pdf"'},
+    )
 
 
 @app.get("/health")
@@ -185,7 +270,7 @@ async def onboarding_documents(
 def approve_company_profile(
     company_id: str,
     payload: CompanyProfileApproval,
-    identity: tuple[str, str] = Depends(require_roles("analyst", "admin")),
+    identity: tuple[str, str] = Depends(require_roles("admin")),
 ) -> dict:
     _, role = identity
     try:
@@ -204,7 +289,7 @@ def approve_company_profile(
 def delete_onboarding_document(
     company_id: str,
     document_id: str,
-    _: tuple[str, str] = Depends(require_roles("analyst", "admin")),
+    _: tuple[str, str] = Depends(require_roles("admin")),
 ) -> dict:
     try:
         return remove_profile_document(company_id, document_id)
@@ -337,7 +422,77 @@ def get_compliance_review_report(
     if not item:
         raise HTTPException(status_code=404, detail="compliance review not found")
     return {"review": item, "impact_graph": impact_graph(),
-            "disclaimer": "Decision support only. Synthetic demo financial inputs are explicitly labelled."}
+            "disclaimer": "Decision support only. Financial values are shown only from approved company inputs or cited official penalties."}
+
+
+@app.post("/analysis-feedback", status_code=201)
+def create_analysis_feedback(
+    payload: AnalysisFeedbackCreate,
+    identity: tuple[str, str] = Depends(require_roles("analyst", "admin")),
+) -> dict:
+    reviewer_id, reviewer_role = identity
+    with db.connect() as connection:
+        company = connection.execute(
+            "SELECT company_id FROM company_profiles WHERE company_id=?", (payload.company_id,)
+        ).fetchone()
+    if not company:
+        raise HTTPException(status_code=404, detail="company not found")
+    allowed_corrections = {
+        "applicability": {"applicable", "not_applicable", "needs_review"},
+        "requirement_assessment": {
+            "compliant", "partially_compliant", "non_compliant",
+            "needs_review", "insufficient_evidence",
+        },
+        "compliance_finding": {
+            "compliant", "partially_compliant", "non_compliant",
+            "needs_review", "insufficient_evidence",
+        },
+    }
+    if payload.decision == "reject" and payload.corrected_value not in allowed_corrections[payload.target_type]:
+        raise HTTPException(status_code=422, detail="a valid corrected classification is required when rejecting")
+    if payload.decision == "confirm" and payload.corrected_value is not None:
+        raise HTTPException(status_code=422, detail="confirmed feedback must not include a corrected classification")
+    with db.connect() as connection:
+        if payload.target_type == "applicability":
+            prefix = "regulatory-document:"
+            document_id = payload.subject_key[len(prefix):] if payload.subject_key.startswith(prefix) else ""
+            candidates = connection.execute(
+                """SELECT r.scan_id FROM scan_document_results r
+                     JOIN regulatory_scan_runs s USING(scan_id)
+                    WHERE s.company_id=? AND r.document_id=?""",
+                (payload.company_id, document_id),
+            ).fetchall()
+            valid_target = any(
+                db.stable_id("applicability", row["scan_id"], document_id) == payload.target_id
+                for row in candidates
+            )
+        elif payload.target_type == "requirement_assessment":
+            row = connection.execute(
+                """SELECT a.clause_id, a.evidence_fingerprint
+                     FROM requirement_assessments a
+                     JOIN company_documents d USING(company_document_id)
+                    WHERE a.assessment_id=? AND d.company_id=?""",
+                (payload.target_id, payload.company_id),
+            ).fetchone()
+            valid_target = bool(
+                row and payload.subject_key == f"requirement:{row['clause_id']}"
+                and payload.evidence_fingerprint == row["evidence_fingerprint"]
+            )
+        else:
+            row = connection.execute(
+                """SELECT f.requirement_id FROM compliance_review_findings f
+                     JOIN compliance_reviews r USING(compliance_review_id)
+                    WHERE f.review_finding_id=? AND r.company_id=?""",
+                (payload.target_id, payload.company_id),
+            ).fetchone()
+            valid_target = bool(row and payload.subject_key == f"compliance-finding:{row['requirement_id']}")
+    if not valid_target:
+        raise HTTPException(status_code=404, detail="analysis result not found for this company")
+    item = db.add_analysis_feedback({
+        **payload.model_dump(), "reviewer_id": reviewer_id, "reviewer_role": reviewer_role,
+    })
+    return {"feedback": item,
+            "learning_policy": "Structured reviewer feedback is retained and reused only for matching evidence fingerprints; no autonomous model training occurs."}
 
 
 @app.get("/impact-graph")
@@ -376,6 +531,17 @@ def versions(
     for row in rows:
         row.pop("content", None)
     return {"versions": rows}
+
+
+@app.get("/documents/versions/{version_id}/text")
+def version_original_text(
+    version_id: str,
+    _: tuple[str, str] = Depends(require_roles("analyst", "reviewer", "admin")),
+) -> dict:
+    version = db.get_document_version(version_id)
+    if not version:
+        raise HTTPException(status_code=404, detail="document version not found")
+    return {"text": version["content"]}
 
 
 @app.post("/sources", status_code=201)

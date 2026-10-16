@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from urllib.parse import urljoin, urlparse
 
@@ -106,4 +107,10 @@ class NCAConnector(RegulatorySourceConnector):
         for slug in self.target_slugs:
             canonical = f"https://nca.gov.sa/ar/regulatory-documents/controls-list/{slug}/"
             found.setdefault(canonical, slug.upper())
-        return [self._parse_detail(source_id, url, title) for url, title in sorted(found.items())]
+        entries = sorted(found.items())
+        # Detail pages are independent official requests. Bounded parallelism keeps
+        # the scan responsive without putting unnecessary load on the authority.
+        with ThreadPoolExecutor(max_workers=min(5, len(entries) or 1)) as executor:
+            return list(executor.map(
+                lambda item: self._parse_detail(source_id, item[0], item[1]), entries
+            ))

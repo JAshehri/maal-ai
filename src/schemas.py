@@ -506,3 +506,32 @@ class CompanyProfileApproval(StrictModel):
     expected_version: int = Field(ge=1)
     profile_edits: dict[str, list[str]] = Field(default_factory=dict)
     scope_updates: list[ScopeUpdate] = Field(default_factory=list)
+
+
+class AuthSetup(StrictModel):
+    username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
+    display_name: str = Field(min_length=2, max_length=120)
+    password: str = Field(min_length=10, max_length=200)
+
+
+class AuthLogin(StrictModel):
+    username: str = Field(min_length=3, max_length=64)
+    password: str = Field(min_length=1, max_length=200)
+
+
+class AnalysisFeedbackCreate(StrictModel):
+    company_id: str = Field(min_length=3, max_length=160)
+    target_type: Literal["applicability", "requirement_assessment", "compliance_finding"]
+    target_id: str = Field(min_length=3, max_length=160)
+    subject_key: str = Field(min_length=3, max_length=300)
+    evidence_fingerprint: str | None = Field(default=None, max_length=128)
+    decision: Literal["confirm", "reject"]
+    corrected_value: str | None = Field(default=None, max_length=100)
+    comment: str = Field(min_length=2, max_length=2000)
+
+
+class UserCreate(StrictModel):
+    username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
+    display_name: str = Field(min_length=2, max_length=120)
+    password: str = Field(min_length=10, max_length=200)
+    role: Literal["admin", "analyst"] = "analyst"

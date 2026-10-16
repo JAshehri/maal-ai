@@ -49,6 +49,9 @@ class Settings:
     pipeline_version: str = "maal-state-machine-2.0"
     connector_timeout_seconds: float = float(os.getenv("MAAL_CONNECTOR_TIMEOUT_SECONDS", "30"))
     connector_max_retries: int = min(2, max(0, int(os.getenv("MAAL_CONNECTOR_MAX_RETRIES", "2"))))
+    connector_concurrency: int = min(
+        8, max(1, int(os.getenv("MAAL_CONNECTOR_CONCURRENCY", "4")))
+    )
     connector_user_agent: str = os.getenv(
         "MAAL_CONNECTOR_USER_AGENT", "Maal-Regulatory-Monitor/2.0 (+local compliance demo)"
     )

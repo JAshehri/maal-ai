@@ -15,3 +15,10 @@ work/*.db
 work/*.log
 work/regulatory_raw/
 work/pytest-*/
+.test-*/
+.pdf-pip-tmp/
+tmp/
+work/bundle-*/
+work/deploy-*/
+work/*.zip
+work/ui-fixtures/

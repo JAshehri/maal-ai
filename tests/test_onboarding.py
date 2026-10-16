@@ -11,6 +11,7 @@ from src.onboarding import (
     create_profile_from_documents,
     get_onboarding,
     live_ui_overview,
+    materialize_approved_company_evidence,
     remove_profile_document,
     seed_regulatory_domains,
 )
@@ -106,6 +107,21 @@ def test_analyst_cannot_remove_mandatory_scope_and_approval_has_no_demo_values(c
         db_path=clean_database,
     )
     assert approved["status"] == "completed"
+
+    snapshot_id = approved["profile_version"]["company_snapshot_id"]
+    evidence_documents = db.list_company_documents(snapshot_id, clean_database)
+    assert {item["filename"] for item in evidence_documents} == {
+        "company-overview.txt", "supply-chain.txt",
+    }
+    assert all(db.list_company_document_chunks(item["company_document_id"], clean_database)
+               for item in evidence_documents)
+
+    with db.connect(clean_database) as connection:
+        connection.execute("DELETE FROM company_document_chunks")
+        connection.execute("DELETE FROM company_documents")
+    backfill = materialize_approved_company_evidence(snapshot_id, db_path=clean_database)
+    assert backfill["documents_created"] == 2
+    assert materialize_approved_company_evidence(snapshot_id, db_path=clean_database)["documents_created"] == 0
 
     overview = live_ui_overview(company_id, clean_database)
     assert overview["scan"] is None
@@ -206,6 +222,7 @@ def test_normal_mode_api_uses_onboarding_and_never_exposes_demo(tmp_path):
     object.__setattr__(settings, "database_path", tmp_path / "normal-mode.db")
     object.__setattr__(settings, "demo_mode", False)
     headers = {"X-Role": "analyst", "X-User-Id": "analyst-test"}
+    admin_headers = {"X-Role": "admin", "X-User-Id": "admin-test"}
     try:
         with TestClient(app) as client:
             assert client.get("/demo/context", headers=headers).status_code == 404
@@ -227,7 +244,7 @@ def test_normal_mode_api_uses_onboarding_and_never_exposes_demo(tmp_path):
             updates = [{"code": item["code"], "status": "confirmed"} for item in profile["scope"]]
             approved = client.post(
                 f"/onboarding/{profile['company']['company_id']}/approve",
-                headers=headers,
+                headers=admin_headers,
                 json={"expected_version": 1, "profile_edits": {}, "scope_updates": updates},
             )
             assert approved.status_code == 200
@@ -241,6 +258,20 @@ def test_normal_mode_api_uses_onboarding_and_never_exposes_demo(tmp_path):
             assert payload["scan"] is None
             assert payload["regulations"] == []
             assert payload["summary"]["estimated_financial_exposure"] is None
+            feedback = client.post(
+                "/analysis-feedback",
+                headers=headers,
+                json={
+                    "company_id": profile["company"]["company_id"],
+                    "target_type": "applicability",
+                    "target_id": "scan-result-review-target",
+                    "subject_key": "regulatory-document:document-under-review",
+                    "decision": "reject",
+                    "corrected_value": "applicable",
+                    "comment": "The manufacturing scope in the approved company file makes this relevant.",
+                },
+            )
+            assert feedback.status_code == 404, feedback.text
     finally:
         object.__setattr__(settings, "database_path", original_path)
         object.__setattr__(settings, "demo_mode", original_demo)
@@ -253,6 +284,7 @@ def test_company_document_delete_api_and_reupload(tmp_path):
     object.__setattr__(settings, "database_path", tmp_path / "document-delete.db")
     object.__setattr__(settings, "demo_mode", False)
     headers = {"X-Role": "analyst", "X-User-Id": "analyst-test"}
+    admin_headers = {"X-Role": "admin", "X-User-Id": "admin-test"}
     try:
         with TestClient(app) as client:
             uploaded = client.post(
@@ -268,7 +300,7 @@ def test_company_document_delete_api_and_reupload(tmp_path):
 
             deleted = client.delete(
                 f"/onboarding/{company_id}/documents/{document_id}",
-                headers=headers,
+                headers=admin_headers,
             )
             assert deleted.status_code == 200
             assert deleted.json()["documents"] == []

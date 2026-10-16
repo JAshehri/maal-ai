@@ -14,6 +14,7 @@ from .demo import seed_demo
 from .pipeline import create_run, execute_run
 from .schemas import ComplianceReviewCreate, FinancialInput, RunCreate
 from .settings import settings
+from .requirement_matching import assess_version_against_company
 
 
 STATUS_FACTOR = {
@@ -234,6 +235,54 @@ def create_compliance_review(request: ComplianceReviewCreate, db_path=None) -> d
                 "project_id": document.get("project_id"), "relationship_type": "superseded_reference",
             }, db_path)
 
+    # Review the uploaded file against current applicable requirements as well,
+    # even when the regulation has no verified previous version. This complements
+    # the 30-day superseded-reference check above instead of depending on it.
+    with db.connect(db_path) as connection:
+        latest_scan = connection.execute(
+            """SELECT scan_id FROM regulatory_scan_runs
+                WHERE company_snapshot_id=? AND status IN ('completed','completed_with_errors')
+                ORDER BY started_at DESC LIMIT 1""",
+            (request.company_snapshot_id,),
+        ).fetchone()
+    if latest_scan:
+        for scan_result in db.get_scan_results(latest_scan["scan_id"], db_path):
+            if scan_result["applicability_status"] != "applicable" or not scan_result.get("version_id"):
+                continue
+            assessments = assess_version_against_company(
+                company_snapshot_id=request.company_snapshot_id,
+                company_document_id=request.company_document_id,
+                version_id=scan_result["version_id"], source_id=scan_result["source_id"],
+                regulatory_document_id=scan_result["document_id"], db_path=db_path,
+            )
+            for assessment in assessments:
+                requirement_id = db.stable_id("current-requirement", assessment["clause"].clause_id)
+                finding_id = db.stable_id("crf", review_id, requirement_id)
+                factor = STATUS_FACTOR.get(assessment["status"])
+                weight = 3.0 if assessment["comparison"].get("required_ratio") else 2.0
+                severity = ("high" if assessment["status"] == "non_compliant" else
+                            "medium" if assessment["status"] == "partially_compliant" else "low")
+                with db.connect(db_path) as connection:
+                    cursor = connection.execute(
+                        """INSERT OR IGNORE INTO compliance_review_findings
+                           (review_finding_id, compliance_review_id, requirement_id, source_id, version_id,
+                            clause_id, change_id, article_ref, status, severity, weight, score_factor,
+                            company_chunk_id, locator_json, document_quote, regulatory_quote, rationale,
+                            recommended_fix, warning_code, created_at)
+                           VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)""",
+                        (finding_id, review_id, requirement_id, scan_result["source_id"],
+                         scan_result["version_id"], assessment["clause"].clause_id,
+                         assessment["clause"].article_ref, assessment["status"], severity, weight,
+                         factor, assessment["chunk"]["chunk_id"], _json(assessment["chunk"]["locator"]),
+                         assessment["chunk"]["text"], assessment["clause"].text,
+                         assessment["rationale"], assessment["recommended_fix"], _now()),
+                    )
+                if cursor.rowcount:
+                    if factor is not None:
+                        assessed += weight
+                        weighted += weight * factor
+                    findings.append({"status": assessment["status"], "change_id": None})
+
     score = round(weighted / assessed * 100, 1) if assessed else None
     overall = "completed" if findings else "needs_review"
     summary = {"requirements_assessed": len(findings), "warning":
@@ -250,8 +299,8 @@ def create_compliance_review(request: ComplianceReviewCreate, db_path=None) -> d
     return db.get_compliance_review(review_id, db_path)
 
 
-def impact_graph(db_path=None) -> dict[str, Any]:
-    dependencies = db.list_dependencies(db_path=db_path)
+def impact_graph(db_path=None, *, company_snapshot_id: str | None = None) -> dict[str, Any]:
+    dependencies = db.list_dependencies(company_snapshot_id=company_snapshot_id, db_path=db_path)
     nodes, edges = {}, []
     for dep in dependencies:
         locator = dep.get("locator") or {}
